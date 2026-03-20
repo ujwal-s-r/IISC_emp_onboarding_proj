@@ -85,20 +85,36 @@ async def setup_role(
         seniority=seniority,
     )
 
-    return db_role
+    # Return dict to map clean to Pydantic without triggering lazy-load of relationships
+    return {
+        "id": db_role.id,
+        "title": db_role.title,
+        "seniority": db_role.seniority,
+        "jd_text": db_role.jd_text,
+        "status": db_role.status,
+        "target_skills": []
+    }
 
 
 @router.get("/roles", response_model=List[RoleResponse])
 async def list_roles(db: AsyncSession = Depends(get_db)):
     from sqlalchemy import select
-    result = await db.execute(select(Role))
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Role).options(selectinload(Role.target_skills))
+    )
     return result.scalars().all()
 
 
 @router.get("/roles/{role_id}", response_model=RoleFullResponse)
 async def get_role(role_id: str, db: AsyncSession = Depends(get_db)):
     from sqlalchemy import select
-    result = await db.execute(select(Role).where(Role.id == role_id))
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Role)
+        .options(selectinload(Role.target_skills), selectinload(Role.relevance_signals))
+        .where(Role.id == role_id)
+    )
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")

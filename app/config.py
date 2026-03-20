@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = "sk-..."
     LLM_MODEL: str = "nvidia/nemotron-3-super-120b-a12b:free"
     
+    # Nvidia API
+    NVIDIA_API_KEY: str = "nvapi-..."
+    
     # Qdrant Cloud
     QDRANT_URL: str = "https://..."
     QDRANT_API_KEY: str = "..."

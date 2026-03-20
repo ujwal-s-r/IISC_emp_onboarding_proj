@@ -17,10 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.agent_creator import agent_creator
 from app.services.pdf_service import pdf_service
+from app.services.skill_normalizer import normalize_skills
 from app.api.routers.websocket import manager
-from app.clients.vector_client import vector_client
-from app.clients.graph_client import graph_client
-from app.clients.embedding_client import embedding_client
 from app.models.domain import Role, TargetSkill, TeamRelevanceSignal
 from app.utils.logger import logger
 
@@ -87,61 +85,8 @@ def calculate_tier(recency: str) -> str:
 
 
 # ── Step 3: Normalize skills via O*NET backbone ───────────────────────────────
-
-def normalize_skills(raw_skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Embeds each skill name and searches Qdrant for the closest O*NET entry.
-    Falls back to the raw LLM name if no confident match is found.
-    """
-    normalized: List[Dict[str, Any]] = []
-
-    for skill in raw_skills:
-        raw_name = skill["skill_name"]
-        result = dict(skill)
-        result["canonical_id"] = None
-        result["onet_level"]   = None
-        result["matched_name"] = raw_name
-
-        try:
-            vec  = embedding_client.embed_query(raw_name)
-            hits = vector_client.client.search(
-                collection_name=ONET_COLLECTION,
-                query_vector=vec,
-                limit=1,
-                score_threshold=NORMALIZATION_THRESHOLD,
-            )
-
-            if hits:
-                top     = hits[0]
-                payload = top.payload or {}
-                cid     = payload.get("canonical_id")
-                mname   = payload.get("name", raw_name)
-
-                result["canonical_id"] = cid
-                result["matched_name"] = mname
-                logger.info(f"'{raw_name}' -> '{mname}' [{cid}] (score={top.score:.3f})")
-
-                # Enrich with O*NET Level from Neo4j (sync driver call – fine in background)
-                if cid:
-                    with graph_client.driver.session() as session:
-                        rec = session.run(
-                            """
-                            MATCH ()-[r:REQUIRES_SKILL]->(sk {canonical_id: $cid})
-                            RETURN avg(r.level) AS avg_level
-                            """,
-                            cid=cid,
-                        ).single()
-                        if rec and rec["avg_level"] is not None:
-                            result["onet_level"] = round(rec["avg_level"], 2)
-            else:
-                logger.info(f"No O*NET match for '{raw_name}' – keeping raw name.")
-
-        except Exception as e:
-            logger.warning(f"Normalization error for '{raw_name}': {e}")
-
-        normalized.append(result)
-
-    return normalized
+# Now delegated to app.services.skill_normalizer (LLM-judge + Qdrant top-3 + auto-create)
+# normalize_skills is imported at top of file.
 
 
 # ── Step 6: Persist results to SQLite ────────────────────────────────────────
@@ -208,12 +153,12 @@ async def orchestrate_employer_flow(
     skills_json = json.loads(_clean_json(jd_resp.content))
     logger.info(f"LLM extracted {len(skills_json)} raw skills.")
 
-    # ── 3: Normalize via O*NET ───────────────────────────────────────────────
+    # ── 3: Normalize via O*NET (LLM judge + Qdrant top-3) ────────────────────
     await manager.broadcast_to_session(role_id, {
         "step": "normalization", "status": "in_progress",
         "message": f"Normalizing {len(skills_json)} skills against O*NET backbone…"
     })
-    normalized_skills = normalize_skills(skills_json)
+    normalized_skills = await normalize_skills(skills_json)
     matched = sum(1 for s in normalized_skills if s.get("canonical_id"))
     logger.info(f"Normalization done. {matched}/{len(normalized_skills)} matched to O*NET.")
 
