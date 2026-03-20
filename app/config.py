@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./adaptiq.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./DB/adaptiq.db"
 
     # OpenRouter LLM
     OPENROUTER_API_KEY: str = "sk-..."
