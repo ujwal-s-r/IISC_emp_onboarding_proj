@@ -1,0 +1,306 @@
+import type { AnalysisResult } from '../types';
+
+export const MOCK_ANALYSIS_RESULT: AnalysisResult = {
+  sessionId: 'sess_demo_2024_001',
+  timestamp: new Date().toISOString(),
+  skillMatchScore: 68,
+  careerReadinessScore: 72,
+  candidateName: 'Alex Johnson',
+  targetRole: 'Senior Full Stack Engineer',
+
+  matchedSkills: [
+    { name: 'Python', priority: 'high', proficiency: 'advanced', confidence: 0.94, category: 'Programming' },
+    { name: 'React', priority: 'high', proficiency: 'intermediate', confidence: 0.87, category: 'Frontend' },
+    { name: 'PostgreSQL', priority: 'high', proficiency: 'intermediate', confidence: 0.82, category: 'Database' },
+    { name: 'REST APIs', priority: 'medium', proficiency: 'advanced', confidence: 0.91, category: 'Architecture' },
+    { name: 'Git / GitHub', priority: 'medium', proficiency: 'advanced', confidence: 0.96, category: 'DevOps' },
+    { name: 'TypeScript', priority: 'medium', proficiency: 'beginner', confidence: 0.73, category: 'Programming' },
+    { name: 'Node.js', priority: 'medium', proficiency: 'intermediate', confidence: 0.79, category: 'Backend' },
+    { name: 'Tailwind CSS', priority: 'low', proficiency: 'intermediate', confidence: 0.84, category: 'Frontend' },
+  ],
+
+  missingSkills: [
+    { name: 'Docker', priority: 'high', confidence: 0.95, category: 'DevOps' },
+    { name: 'Kubernetes', priority: 'high', confidence: 0.91, category: 'DevOps' },
+    { name: 'AWS', priority: 'high', confidence: 0.89, category: 'Cloud' },
+    { name: 'Redis', priority: 'medium', confidence: 0.83, category: 'Database' },
+    { name: 'GraphQL', priority: 'medium', confidence: 0.78, category: 'API' },
+    { name: 'CI/CD Pipelines', priority: 'medium', confidence: 0.86, category: 'DevOps' },
+    { name: 'Microservices', priority: 'low', confidence: 0.74, category: 'Architecture' },
+    { name: 'Terraform', priority: 'low', confidence: 0.69, category: 'Infrastructure' },
+  ],
+
+  candidateSkills: [
+    { name: 'Python', priority: 'high', proficiency: 'advanced', confidence: 0.94, category: 'Programming' },
+    { name: 'React', priority: 'high', proficiency: 'intermediate', confidence: 0.87, category: 'Frontend' },
+    { name: 'PostgreSQL', priority: 'high', proficiency: 'intermediate', confidence: 0.82, category: 'Database' },
+    { name: 'REST APIs', priority: 'medium', proficiency: 'advanced', confidence: 0.91, category: 'Architecture' },
+    { name: 'Git / GitHub', priority: 'medium', proficiency: 'advanced', confidence: 0.96, category: 'DevOps' },
+  ],
+
+  requiredSkills: [
+    { name: 'React', priority: 'high', confidence: 0.95, category: 'Frontend' },
+    { name: 'Python', priority: 'high', confidence: 0.92, category: 'Programming' },
+    { name: 'Docker', priority: 'high', confidence: 0.94, category: 'DevOps' },
+    { name: 'Kubernetes', priority: 'high', confidence: 0.90, category: 'DevOps' },
+    { name: 'AWS', priority: 'high', confidence: 0.88, category: 'Cloud' },
+    { name: 'PostgreSQL', priority: 'high', confidence: 0.85, category: 'Database' },
+    { name: 'TypeScript', priority: 'medium', confidence: 0.83, category: 'Programming' },
+  ],
+
+  radarData: [
+    { skill: 'Python', candidate: 90, required: 85, fullMark: 100 },
+    { skill: 'Frontend', candidate: 75, required: 90, fullMark: 100 },
+    { skill: 'DevOps', candidate: 18, required: 82, fullMark: 100 },
+    { skill: 'Cloud', candidate: 12, required: 76, fullMark: 100 },
+    { skill: 'Databases', candidate: 70, required: 75, fullMark: 100 },
+    { skill: 'APIs', candidate: 85, required: 80, fullMark: 100 },
+    { skill: 'Architecture', candidate: 52, required: 72, fullMark: 100 },
+    { skill: 'Testing', candidate: 38, required: 65, fullMark: 100 },
+  ],
+
+  learningRoadmap: [
+    {
+      phase: 1,
+      title: 'Foundation',
+      description: 'Build core DevOps and containerization fundamentals required for all modern engineering roles.',
+      duration: '3–4 weeks',
+      difficulty: 'beginner',
+      skills: [
+        {
+          name: 'Docker',
+          duration: '1.5 weeks',
+          difficulty: 'beginner',
+          reason: 'Critical — explicitly required in JD; containerization is foundational to the entire stack.',
+          confidence: 0.95,
+          resources: [
+            { title: 'Docker Official Getting Started', url: 'https://docs.docker.com/get-started/', platform: 'Official Docs', difficulty: 'beginner', duration: '4 hours', free: true },
+            { title: 'Docker & Kubernetes: The Practical Guide', url: 'https://www.udemy.com/course/docker-kubernetes-the-practical-guide/', platform: 'Udemy', difficulty: 'beginner', duration: '23 hours', free: false },
+          ],
+        },
+        {
+          name: 'Linux Fundamentals',
+          duration: '1 week',
+          difficulty: 'beginner',
+          reason: 'Prerequisite for Docker, Kubernetes, and cloud infrastructure.',
+          confidence: 0.88,
+          resources: [
+            { title: 'Linux Command Line Basics', url: 'https://www.freecodecamp.org/news/linux-command-line-tutorial/', platform: 'FreeCodeCamp', difficulty: 'beginner', duration: '6 hours', free: true },
+          ],
+        },
+        {
+          name: 'Networking Basics',
+          duration: '0.5 weeks',
+          difficulty: 'beginner',
+          reason: 'Essential for understanding microservices communication and cloud architecture.',
+          confidence: 0.82,
+          resources: [
+            { title: 'Computer Networking — Full Course', url: 'https://www.youtube.com/watch?v=qiQR5rTSshw', platform: 'YouTube', difficulty: 'beginner', duration: '9 hours', free: true },
+          ],
+        },
+      ],
+    },
+    {
+      phase: 2,
+      title: 'Cloud & CI/CD',
+      description: 'Master cloud deployment and automated pipelines to ship code reliably at scale.',
+      duration: '4–5 weeks',
+      difficulty: 'intermediate',
+      skills: [
+        {
+          name: 'AWS',
+          duration: '2 weeks',
+          difficulty: 'intermediate',
+          reason: 'High priority — JD specifies AWS experience; EC2, S3, and RDS are mentioned explicitly.',
+          confidence: 0.89,
+          resources: [
+            { title: 'AWS Certified Cloud Practitioner', url: 'https://aws.amazon.com/certification/certified-cloud-practitioner/', platform: 'Official Docs', difficulty: 'beginner', duration: '20 hours', free: false },
+            { title: 'AWS Fundamentals Specialization', url: 'https://www.coursera.org/specializations/aws-fundamentals', platform: 'Coursera', difficulty: 'intermediate', duration: '30 hours', free: false, rating: 4.7 },
+          ],
+        },
+        {
+          name: 'CI/CD Pipelines',
+          duration: '1.5 weeks',
+          difficulty: 'intermediate',
+          reason: 'JD requires experience with GitHub Actions or Jenkins for automated deployment workflows.',
+          confidence: 0.86,
+          resources: [
+            { title: 'GitHub Actions Documentation', url: 'https://docs.github.com/en/actions', platform: 'Official Docs', difficulty: 'intermediate', duration: '5 hours', free: true },
+          ],
+        },
+        {
+          name: 'Redis',
+          duration: '1 week',
+          difficulty: 'intermediate',
+          reason: 'Required for caching layer mentioned in JD system design section.',
+          confidence: 0.83,
+          resources: [
+            { title: 'Redis University — RU101', url: 'https://university.redis.com/courses/ru101/', platform: 'Official Docs', difficulty: 'beginner', duration: '8 hours', free: true },
+          ],
+        },
+      ],
+    },
+    {
+      phase: 3,
+      title: 'Advanced Architecture',
+      description: 'Learn Kubernetes orchestration, GraphQL, and microservices design patterns.',
+      duration: '4–5 weeks',
+      difficulty: 'advanced',
+      skills: [
+        {
+          name: 'Kubernetes',
+          duration: '2 weeks',
+          difficulty: 'advanced',
+          reason: 'JD explicitly requires K8s for container orchestration in production environments.',
+          confidence: 0.91,
+          resources: [
+            { title: 'Kubernetes Official Tutorial', url: 'https://kubernetes.io/docs/tutorials/', platform: 'Official Docs', difficulty: 'intermediate', duration: '10 hours', free: true },
+            { title: 'Kubernetes for Developers', url: 'https://www.coursera.org/learn/kubernetes-for-developers', platform: 'Coursera', difficulty: 'advanced', duration: '15 hours', free: false, rating: 4.8 },
+          ],
+        },
+        {
+          name: 'GraphQL',
+          duration: '1 week',
+          difficulty: 'intermediate',
+          reason: 'API layer mentioned in JD; the existing REST knowledge provides a strong bridge.',
+          confidence: 0.78,
+          resources: [
+            { title: 'GraphQL Official Learn', url: 'https://graphql.org/learn/', platform: 'Official Docs', difficulty: 'intermediate', duration: '5 hours', free: true },
+            { title: 'Full Stack Open — GraphQL', url: 'https://fullstackopen.com/en/part8', platform: 'Documentation', difficulty: 'intermediate', duration: '8 hours', free: true },
+          ],
+        },
+        {
+          name: 'Microservices',
+          duration: '1.5 weeks',
+          difficulty: 'advanced',
+          reason: 'Architecture pattern required for designing the distributed system described in JD.',
+          confidence: 0.74,
+          resources: [
+            { title: 'Microservices with Node.js and React', url: 'https://www.udemy.com/course/microservices-with-node-js-and-react/', platform: 'Udemy', difficulty: 'advanced', duration: '54 hours', free: false },
+          ],
+        },
+      ],
+    },
+    {
+      phase: 4,
+      title: 'Job Readiness',
+      description: 'Infrastructure as Code with Terraform and end-to-end system design practice.',
+      duration: '2–3 weeks',
+      difficulty: 'advanced',
+      skills: [
+        {
+          name: 'Terraform',
+          duration: '1.5 weeks',
+          difficulty: 'advanced',
+          reason: 'IaC tool listed as bonus in JD; demonstrates production-level DevOps maturity.',
+          confidence: 0.69,
+          resources: [
+            { title: 'Terraform: Get Started — AWS', url: 'https://developer.hashicorp.com/terraform/tutorials/aws-get-started', platform: 'Official Docs', difficulty: 'intermediate', duration: '6 hours', free: true },
+          ],
+        },
+        {
+          name: 'System Design Practice',
+          duration: '1 week',
+          difficulty: 'advanced',
+          reason: 'Senior roles require demonstrating architectural thinking in interviews.',
+          confidence: 0.88,
+          resources: [
+            { title: 'System Design Interview — Alex Xu', url: 'https://www.youtube.com/watch?v=i7twT3x5yv8', platform: 'YouTube', difficulty: 'advanced', duration: '10 hours', free: true },
+          ],
+        },
+      ],
+    },
+  ],
+
+  reasoningTrace: [
+    {
+      skill: 'Docker',
+      missing: true,
+      reason: "JD explicitly states 'containerization experience required'; Docker is the industry standard. Resume lacks any mention of containers, container images, or deployment pipelines.",
+      priority: 'High',
+      confidence: 0.95,
+      source: 'JD Keyword Match + Skill Ontology',
+      category: 'DevOps',
+    },
+    {
+      skill: 'Kubernetes',
+      missing: true,
+      reason: "JD lists 'K8s/container orchestration' under required skills. No Kubernetes or similar orchestration tools detected in resume.",
+      priority: 'High',
+      confidence: 0.91,
+      source: 'JD Keyword Match + BAAI Embedding Similarity',
+      category: 'DevOps',
+    },
+    {
+      skill: 'AWS',
+      missing: true,
+      reason: "JD requires cloud platform experience (AWS preferred). Resume shows no cloud certifications or AWS service mentions (EC2, S3, Lambda, RDS).",
+      priority: 'High',
+      confidence: 0.89,
+      source: 'JD Section: Infrastructure Requirements',
+      category: 'Cloud',
+    },
+    {
+      skill: 'Python',
+      missing: false,
+      reason: 'Resume contains 4+ years of Python experience across 6 projects. Proficiency classified as Advanced (0.94 confidence). Exceeds JD requirement.',
+      priority: 'High',
+      confidence: 0.94,
+      source: 'Resume Section: Experience + Projects',
+      category: 'Programming',
+    },
+    {
+      skill: 'React',
+      missing: false,
+      reason: 'Resume shows React in 3 projects with 2 years of usage. Current proficiency: Intermediate. JD expects Advanced-level proficiency — gap exists at proficiency level.',
+      priority: 'High',
+      confidence: 0.87,
+      source: 'Resume Skills Section + Project Descriptions',
+      category: 'Frontend',
+    },
+    {
+      skill: 'CI/CD Pipelines',
+      missing: true,
+      reason: "JD mentions 'CI/CD experience with GitHub Actions or Jenkins'. Resume shows no automated pipeline configuration or deployment automation.",
+      priority: 'Medium',
+      confidence: 0.86,
+      source: 'JD Section: DevOps Requirements',
+      category: 'DevOps',
+    },
+    {
+      skill: 'Redis',
+      missing: true,
+      reason: 'Caching layer mentioned in JD system architecture section. Redis is the implied technology. No caching experience found in resume.',
+      priority: 'Medium',
+      confidence: 0.83,
+      source: 'JD Architecture Description + Embedding Match',
+      category: 'Database',
+    },
+    {
+      skill: 'GraphQL',
+      missing: true,
+      reason: "JD API section references 'REST or GraphQL APIs'. Candidate has strong REST experience (0.91 confidence) but no GraphQL evidence found.",
+      priority: 'Medium',
+      confidence: 0.78,
+      source: 'JD API Requirements + Resume Project Analysis',
+      category: 'API',
+    },
+  ],
+
+  topResources: [
+    { title: 'Docker Official Getting Started', url: 'https://docs.docker.com/get-started/', platform: 'Official Docs', difficulty: 'beginner', duration: '4 hours', free: true },
+    { title: 'AWS Fundamentals Specialization', url: 'https://www.coursera.org/specializations/aws-fundamentals', platform: 'Coursera', difficulty: 'intermediate', duration: '30 hours', free: false, rating: 4.7 },
+    { title: 'Kubernetes Official Tutorial', url: 'https://kubernetes.io/docs/tutorials/', platform: 'Official Docs', difficulty: 'intermediate', duration: '10 hours', free: true },
+    { title: 'GitHub Actions Documentation', url: 'https://docs.github.com/en/actions', platform: 'Official Docs', difficulty: 'intermediate', duration: '5 hours', free: true },
+    { title: 'Redis University — RU101', url: 'https://university.redis.com/courses/ru101/', platform: 'Official Docs', difficulty: 'beginner', duration: '8 hours', free: true },
+    { title: 'GraphQL Official Learn', url: 'https://graphql.org/learn/', platform: 'Official Docs', difficulty: 'intermediate', duration: '5 hours', free: true },
+  ],
+
+  metrics: {
+    skillExtractionAccuracy: 94.2,
+    gapDetectionPrecision: 91.8,
+    pathCompletionEstimate: '12–16 weeks',
+    estimatedLearningWeeks: 14,
+    trainingReductionPercent: 42,
+  },
+};
