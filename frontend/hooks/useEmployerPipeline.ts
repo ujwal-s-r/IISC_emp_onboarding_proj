@@ -42,6 +42,7 @@ export function useEmployerPipeline() {
   const [resetVersion, setResetVersion] = useState(0);
   const [layoutFocus, setLayoutFocus] = useState<LayoutFocus>("balanced");
   const wsRef = useRef<WebSocket | null>(null);
+  const employeeFlowSeenRef = useRef(false);
 
   const streamKey = (phase: string, step: string) => `${phase}::${step}`;
 
@@ -73,6 +74,7 @@ export function useEmployerPipeline() {
       setPipelineDone(false);
       setLayoutFocus("employer");
       setSubmitState("streaming");
+      employeeFlowSeenRef.current = false;
       const socket = new WebSocket(wsUrl(rid));
       wsRef.current = socket;
 
@@ -93,6 +95,14 @@ export function useEmployerPipeline() {
             raw.data && typeof raw.data === "object"
               ? (raw.data as Record<string, unknown>)
               : {};
+          const isEmployeePhase =
+            phase === "resume_extraction" ||
+            phase === "gap" ||
+            phase === "path" ||
+            phase === "journey";
+          if (isEmployeePhase) {
+            employeeFlowSeenRef.current = true;
+          }
 
           if (type === "stream_chunk") {
             const chunkType = String(data.chunk_type ?? "");
@@ -120,14 +130,23 @@ export function useEmployerPipeline() {
             phase === "jd_extraction" ||
             phase === "normalization" ||
             phase === "team_context" ||
-            phase === "mastery"
+            phase === "mastery" ||
+            phase === "resume_extraction" ||
+            phase === "gap" ||
+            phase === "path" ||
+            phase === "journey"
           ) {
             setLayoutFocus("employer");
           }
           if (phase === "db" && type === "complete") {
-            setPipelineDone(true);
-            setLayoutFocus("resume");
-            setSubmitState("done");
+            const employeePersistDone = step === "employee_persist_done";
+            if (!employeeFlowSeenRef.current || employeePersistDone) {
+              setPipelineDone(true);
+              setLayoutFocus("resume");
+              setSubmitState("done");
+            } else {
+              setSubmitState("streaming");
+            }
           }
         } catch {
           /* ignore malformed */
@@ -155,6 +174,7 @@ export function useEmployerPipeline() {
       setStreams({});
       setRoleId(null);
       setPipelineDone(false);
+      employeeFlowSeenRef.current = false;
       setHistoricalData(null);
       setHistoricalMode(false);
 
@@ -216,6 +236,7 @@ export function useEmployerPipeline() {
     setLayoutFocus("employer");
     setRoleId(id);
     setPipelineDone(false);
+    employeeFlowSeenRef.current = false;
 
     try {
       const roleRes = await fetch(`${API_BASE}/api/v1/employer/roles/${encodeURIComponent(id)}`);
@@ -355,7 +376,7 @@ export function useEmployerPipeline() {
             role_id: id,
             phase: "db",
             type: "complete",
-            step: "db_persist_done",
+            step: "employee_persist_done",
             message: "Loaded historical role snapshot",
             model: null,
             data: { total_skills: targetSkills.length },
@@ -365,11 +386,28 @@ export function useEmployerPipeline() {
 
       setStreams(rebuiltStreams);
       setEvents(rebuiltEvents);
-      setPipelineDone(
-        rebuiltEvents.some((e) => e.phase === "db" && e.type === "complete") ||
-          String(role.status ?? "").toLowerCase() === "completed"
+      employeeFlowSeenRef.current =
+        rebuiltEvents.some(
+          (e) =>
+            e.phase === "resume_extraction" ||
+            e.phase === "gap" ||
+            e.phase === "path" ||
+            e.phase === "journey"
+        ) ||
+        Object.keys(rebuiltStreams).some(
+          (k) =>
+            k.startsWith("resume_extraction::") ||
+            k.startsWith("mastery::") ||
+            k.startsWith("gap::") ||
+            k.startsWith("path::") ||
+            k.startsWith("journey::")
+        );
+
+      const employeePersistDone = rebuiltEvents.some(
+        (e) => e.phase === "db" && e.type === "complete" && e.step === "employee_persist_done"
       );
-      setSubmitState("done");
+      setPipelineDone(employeePersistDone);
+      setSubmitState(employeePersistDone ? "done" : "streaming");
       setHistoricalMode(true);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : "Failed to load role history");
@@ -395,6 +433,7 @@ export function useEmployerPipeline() {
     setSubmitError(null);
     setSubmitState("idle");
     setPipelineDone(false);
+    employeeFlowSeenRef.current = false;
     setHistoricalData(null);
     setHistoricalLoading(false);
     setHistoricalMode(false);

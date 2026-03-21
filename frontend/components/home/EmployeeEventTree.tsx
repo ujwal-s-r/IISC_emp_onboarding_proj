@@ -192,6 +192,26 @@ function streamSignature(streams: Record<string, StreamBuffers>): string {
   return s;
 }
 
+function phaseStreamEntries(
+  streams: Record<string, StreamBuffers>,
+  phase: string
+): Array<{ key: string; step: string; reasoning: string; content: string }> {
+  const out: Array<{ key: string; step: string; reasoning: string; content: string }> = [];
+  const prefix = `${phase}::`;
+  for (const k of Object.keys(streams)) {
+    if (!k.startsWith(prefix)) continue;
+    const v = streams[k];
+    if (!v.reasoning && !v.content) continue;
+    out.push({
+      key: k,
+      step: k.slice(prefix.length) || "stream",
+      reasoning: v.reasoning,
+      content: v.content,
+    });
+  }
+  return out;
+}
+
 export function EmployeeEventTree({
   events,
   streams,
@@ -217,87 +237,47 @@ export function EmployeeEventTree({
     return m;
   }, [events]);
 
+  const streamsByPhase = useMemo(() => {
+    const m: Partial<
+      Record<EmployeePhase, Array<{ key: string; step: string; reasoning: string; content: string }>>
+    > = {};
+    for (const p of EMPLOYEE_PHASE_ORDER) {
+      m[p] = phaseStreamEntries(streams, p);
+    }
+    return m;
+  }, [streams]);
+
   const livePhase = useMemo((): EmployeePhase | null => {
-    const skRes = streamKey("resume_extraction", "llm_extraction_streaming");
-    const skMas = streamKey("mastery", "mastery_scoring_streaming");
-
-    const resumeEnded = events.some(
-      (e) =>
-        e.phase === "resume_extraction" &&
-        e.type === "stream_end" &&
-        e.step === "llm_extraction_streaming"
-    );
-    const masteryEnded = events.some(
-      (e) =>
-        e.phase === "mastery" &&
-        e.type === "stream_end" &&
-        e.step === "mastery_scoring_streaming"
-    );
-
-    const resBuf = streams[skRes];
-    const masBuf = streams[skMas];
-    const resumeStreaming =
-      !resumeEnded &&
-      Boolean(
-        (resBuf?.reasoning && resBuf.reasoning.length > 0) ||
-          (resBuf?.content && resBuf.content.length > 0)
-      );
-    const masteryStreaming =
-      !masteryEnded &&
-      Boolean(
-        (masBuf?.reasoning && masBuf.reasoning.length > 0) ||
-          (masBuf?.content && masBuf.content.length > 0)
-      );
-
     if ((wsOpen || wsStatus === "connecting") && events.length === 0) {
       return "resume_extraction";
     }
-    if (resumeStreaming) return "resume_extraction";
-    if (masteryStreaming) return "mastery";
+
+    for (let i = EMPLOYEE_PHASE_ORDER.length - 1; i >= 0; i--) {
+      const phase = EMPLOYEE_PHASE_ORDER[i];
+      const streamEntries = streamsByPhase[phase] ?? [];
+      const hasLiveStream = streamEntries.some((entry) => {
+        const ended = events.some(
+          (e) => e.phase === phase && e.type === "stream_end" && e.step === entry.step
+        );
+        return !ended && Boolean(entry.reasoning || entry.content);
+      });
+      if (hasLiveStream) return phase;
+    }
 
     const last = events[events.length - 1];
     if (last && isEmployeePhase(last.phase)) return last.phase;
 
     if (wsOpen || wsStatus === "connecting") return "resume_extraction";
     return null;
-  }, [events, streams, streamKey, wsOpen, wsStatus]);
+  }, [events, streamsByPhase, wsOpen, wsStatus]);
 
   const streamSig = useMemo(() => streamSignature(streams), [streams]);
 
   const activeStepScrollTarget = useMemo((): string | null => {
-    const skRes = streamKey("resume_extraction", "llm_extraction_streaming");
-    const skMas = streamKey("mastery", "mastery_scoring_streaming");
-
-    const resumeEnded = events.some(
-      (e) =>
-        e.phase === "resume_extraction" &&
-        e.type === "stream_end" &&
-        e.step === "llm_extraction_streaming"
-    );
-    const masteryEnded = events.some(
-      (e) =>
-        e.phase === "mastery" &&
-        e.type === "stream_end" &&
-        e.step === "mastery_scoring_streaming"
-    );
-
-    const resBuf = streams[skRes];
-    const masBuf = streams[skMas];
-    const resumeStreaming =
-      !resumeEnded &&
-      Boolean(
-        (resBuf?.reasoning && resBuf.reasoning.length > 0) ||
-          (resBuf?.content && resBuf.content.length > 0)
-      );
-    const masteryStreaming =
-      !masteryEnded &&
-      Boolean(
-        (masBuf?.reasoning && masBuf.reasoning.length > 0) ||
-          (masBuf?.content && masBuf.content.length > 0)
-      );
-
-    if (resumeStreaming) return "stream-resume";
-    if (masteryStreaming) return "stream-mastery";
+    if (livePhase) {
+      const entries = streamsByPhase[livePhase] ?? [];
+      if (entries.length) return `stream:${entries[entries.length - 1].key}`;
+    }
 
     const last = events[events.length - 1];
     if (!last) return null;
@@ -325,7 +305,7 @@ export function EmployeeEventTree({
     }
 
     return last.id;
-  }, [events, streams, streamKey]);
+  }, [events, livePhase, streamsByPhase]);
 
   useLayoutEffect(() => {
     const root = scrollParentRef?.current;
@@ -401,11 +381,10 @@ export function EmployeeEventTree({
 
       {EMPLOYEE_PHASE_ORDER.map((phase) => {
         const phaseEvents = byPhase[phase] ?? [];
+        const streamEntries = streamsByPhase[phase] ?? [];
         const isActive =
           livePhase === phase &&
           (wsOpen || wsStatus === "connecting" || phaseEvents.length > 0);
-        const skRes = streamKey("resume_extraction", "llm_extraction_streaming");
-        const skMas = streamKey("mastery", "mastery_scoring_streaming");
 
         return (
           <Collapsible
@@ -437,24 +416,19 @@ export function EmployeeEventTree({
                   }
                   return <LogRow key={e.id} ev={e} />;
                 })}
-                {(streams[skRes]?.reasoning || streams[skRes]?.content) && (
+                {streamEntries.map((entry) => (
                   <div
-                    data-orch-step="stream-resume"
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
                     className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3"
                   >
                     <p className="text-xs font-medium text-violet-200/90">
-                      Live LLM stream (resume)
+                      Live stream ({entry.step})
                     </p>
-                    <StreamBlock
-                      title="Reasoning trace"
-                      text={streams[skRes]?.reasoning ?? ""}
-                    />
-                    <StreamBlock
-                      title="Model output (JSON)"
-                      text={streams[skRes]?.content ?? ""}
-                    />
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
                   </div>
-                )}
+                ))}
                 {resumeResult ? (
                   <div
                     data-orch-step="resume-result"
@@ -551,24 +525,19 @@ export function EmployeeEventTree({
                   }
                   return <LogRow key={e.id} ev={e} />;
                 })}
-                {(streams[skMas]?.reasoning || streams[skMas]?.content) && (
+                {streamEntries.map((entry) => (
                   <div
-                    data-orch-step="stream-mastery"
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
                     className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3"
                   >
                     <p className="text-xs font-medium text-amber-200/90">
-                      Live mastery scoring stream
+                      Live stream ({entry.step})
                     </p>
-                    <StreamBlock
-                      title="Reasoning trace"
-                      text={streams[skMas]?.reasoning ?? ""}
-                    />
-                    <StreamBlock
-                      title="Model output (JSON)"
-                      text={streams[skMas]?.content ?? ""}
-                    />
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
                   </div>
-                )}
+                ))}
                 {masteryResult?.data?.skills &&
                 Array.isArray(masteryResult.data.skills) ? (
                   <div
@@ -704,6 +673,40 @@ export function EmployeeEventTree({
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
                 ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-white/20 bg-white/[0.04] p-3"
+                  >
+                    <p className="text-xs font-medium text-white/80">
+                      Live stream ({entry.step})
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {phase === "dependency" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => (
+                  <LogRow key={e.id} ev={e} />
+                ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3"
+                  >
+                    <p className="text-xs font-medium text-cyan-200/90">
+                      Live stream ({entry.step})
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
+                  </div>
+                ))}
               </div>
             ) : null}
 
@@ -712,6 +715,19 @@ export function EmployeeEventTree({
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
                 ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3"
+                  >
+                    <p className="text-xs font-medium text-indigo-200/90">
+                      Live stream ({entry.step})
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
+                  </div>
+                ))}
               </div>
             ) : null}
 
@@ -719,6 +735,19 @@ export function EmployeeEventTree({
               <div className="space-y-2">
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
+                ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-3"
+                  >
+                    <p className="text-xs font-medium text-fuchsia-200/90">
+                      Live stream ({entry.step})
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
+                  </div>
                 ))}
               </div>
             ) : null}
