@@ -51,6 +51,7 @@ _qdrant_courses = QdrantClient(
     api_key=settings.QDRANT_COURSES_API_KEY,
     check_compatibility=False,
 )
+logger.info(f"[PathGenerator] Qdrant courses client → {settings.QDRANT_COURSES_URL}")
 
 
 # ── Level mapping: derive required level from target_mastery ─────────────────

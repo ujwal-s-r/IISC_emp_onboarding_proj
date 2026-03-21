@@ -42,7 +42,9 @@ LIMIT 100
 """
 
 # ── Few-shot prompt ────────────────────────────────────────────────────────────
-_DEPENDENCY_PROMPT = """You are an expert learning-path architect with deep knowledge of technology skill prerequisites.
+_DEPENDENCY_PROMPT = """/think Keep your reasoning CONCISE — under 1000 tokens. Do NOT explain each skill in detail. Just decide the stage order quickly and produce the JSON.
+
+You are an expert learning-path architect with deep knowledge of technology skill prerequisites.
 
 Given a list of SKILL GAPS (skills the employee needs to improve) and an ADJACENCY LIST (known dependency edges from our knowledge graph), your job is to:
 1. Determine the correct learning ORDER — which skills must be learned first (prerequisites) before others can be tackled.
@@ -102,7 +104,7 @@ NOW YOUR TURN
 Input gaps: {gaps_json}
 Input edges (from knowledge graph): {edges_json}
 
-Think carefully about the dependencies. Consider ALL standard technology prerequisites even if they are not listed in the edges above.
+Consider standard technology prerequisites even if not listed above. Be brief in your reasoning — go straight to the JSON.
 Output ONLY the JSON object:"""
 
 
@@ -200,7 +202,7 @@ async def resolve_dependencies(
     reasoning, content = await dependency_llm_client.stream(
         prompt=prompt,
         temperature=0.0,
-        max_tokens=8000,
+        max_tokens=16384,
         role_id=role_id,
         phase="dependency",
         step_name="dep_llm_stream",

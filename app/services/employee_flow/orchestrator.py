@@ -56,6 +56,8 @@ TIER_WEIGHTS = {"T1": 1.0, "T2": 0.7, "T3": 0.4, "T4": 0.1}
 # _clean_json() extracts the last JSON array from content, handling any CoT leak.
 # ─────────────────────────────────────────────────────────────────────────────
 RESUME_EXTRACTION_PROMPT = """
+/think Keep your internal reasoning BRIEF — under 1500 tokens. Go straight to analysis, skip restating the prompt or rules. Output the JSON immediately after deciding.
+
 You are an experienced Technical Recruiter and Senior Engineering Lead performing a first-pass resume screen.
 Your goal is to build a complete skills evidence dossier — not a keyword list.
 
@@ -129,6 +131,8 @@ Resume Text:
 # MASTERY SCORING PROMPT  (gpt-oss-20b + thinking ON)
 # ─────────────────────────────────────────────────────────────────────────────
 MASTERY_SCORING_PROMPT = """
+/think Keep your internal reasoning BRIEF — under 2000 tokens total. For each skill, write ONE short sentence of reasoning, then assign the level. Do NOT restate the rubric or examples in your thinking.
+
 You are a Senior Technical Hiring Manager conducting a rigorous skills assessment.
 Your job is to evaluate PRACTICAL DEPTH — not what the candidate claims to know,
 but what the resume EVIDENCE proves they can actually DO in a production setting.
@@ -386,7 +390,7 @@ async def compute_mastery_scores(
     reasoning, scored_skills_raw = await mastery_llm_client.stream(
         prompt,
         temperature=0.1,
-        max_tokens=24576,   # 24k — thinking trace + content use separate budgets
+        max_tokens=16384,   # 16k — reduced from 24k; thinking directive limits CoT
         role_id=role_id,
         phase="mastery",
         step_name="mastery_scoring_streaming",
