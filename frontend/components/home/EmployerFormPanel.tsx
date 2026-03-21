@@ -8,10 +8,19 @@ export function EmployerFormPanel({
   onSubmit,
   disabled,
   error,
+  initialValues,
+  formKey,
 }: {
   onSubmit: (fd: FormData) => void | Promise<void>;
   disabled?: boolean;
   error?: string | null;
+  initialValues?: {
+    title?: string;
+    seniority?: string;
+    jdText?: string;
+    teamContextText?: string;
+  } | null;
+  formKey?: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -24,6 +33,7 @@ export function EmployerFormPanel({
 
   return (
     <form
+      key={formKey}
       ref={formRef}
       onSubmit={handleSubmit}
       className="flex flex-col gap-5"
@@ -37,6 +47,7 @@ export function EmployerFormPanel({
             name="title"
             required
             placeholder="e.g. Senior Data Engineer"
+            defaultValue={initialValues?.title ?? ""}
             disabled={disabled}
             className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-white placeholder:text-white/25 outline-none ring-white/20 transition focus:ring-2 disabled:opacity-50"
           />
@@ -48,7 +59,7 @@ export function EmployerFormPanel({
           <select
             name="seniority"
             required
-            defaultValue="senior"
+            defaultValue={initialValues?.seniority ?? "senior"}
             disabled={disabled}
             className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-white outline-none ring-white/20 transition focus:ring-2 disabled:opacity-50"
           >
@@ -85,6 +96,7 @@ export function EmployerFormPanel({
               name="jd_text"
               rows={5}
               placeholder="Paste JD here if not uploading a file…"
+              defaultValue={initialValues?.jdText ?? ""}
               disabled={disabled}
               className="resize-y rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none ring-white/20 focus:ring-2 disabled:opacity-50"
             />
@@ -114,6 +126,7 @@ export function EmployerFormPanel({
               name="team_context_text"
               rows={5}
               placeholder="Paste team context here if not uploading a file…"
+              defaultValue={initialValues?.teamContextText ?? ""}
               disabled={disabled}
               className="resize-y rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none ring-white/20 focus:ring-2 disabled:opacity-50"
             />

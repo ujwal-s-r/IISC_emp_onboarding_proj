@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type RefObject } from "react";
 import { employeeOnboardUrl } from "@/lib/config";
+import { EmployeeEventTree } from "@/components/home/EmployeeEventTree";
+import type { NormalizedEmployeeEvent } from "@/lib/employeeTypes";
+import type { StreamBuffers } from "@/hooks/useEmployerPipeline";
 
 export function ResumePanel({
   roleId,
@@ -9,12 +12,30 @@ export function ResumePanel({
   emphasized,
   disabled,
   onUserActivate,
+  onEmployeeSessionStart,
+  employeeEvents,
+  employeeStreams,
+  employeeStreamKey,
+  employeeWsOpen,
+  employeeWsStatus,
+  employeePipelineDone,
+  employeeBusy,
+  employeeOrchestrationRef,
 }: {
   roleId: string | null;
   compact?: boolean;
   emphasized?: boolean;
   disabled?: boolean;
   onUserActivate?: () => void;
+  onEmployeeSessionStart: (employeeId: string) => void;
+  employeeEvents: NormalizedEmployeeEvent[];
+  employeeStreams: Record<string, StreamBuffers>;
+  employeeStreamKey: (phase: string, step: string) => string;
+  employeeWsOpen: boolean;
+  employeeWsStatus: "idle" | "connecting" | "open" | "closed" | "error";
+  employeePipelineDone: boolean;
+  employeeBusy: boolean;
+  employeeOrchestrationRef: RefObject<HTMLDivElement | null>;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -43,7 +64,9 @@ export function ResumePanel({
         throw new Error(t || res.statusText);
       }
       const body = (await res.json()) as { id: string };
-      setMsg(`Employee session ${body.id} created. Onboarding pipeline will run when wired.`);
+      if (!body.id) throw new Error("No employee id returned");
+      setMsg(`Session ${body.id.slice(0, 8)}… — streaming pipeline.`);
+      onEmployeeSessionStart(roleId);
       e.currentTarget.reset();
     } catch (er) {
       setErr(er instanceof Error ? er.message : "Upload failed");
@@ -51,6 +74,8 @@ export function ResumePanel({
       setLoading(false);
     }
   }
+
+  const formLocked = !roleId || disabled || loading || employeeBusy;
 
   return (
     <div
