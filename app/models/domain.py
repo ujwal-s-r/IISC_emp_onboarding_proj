@@ -27,6 +27,9 @@ class TargetSkill(Base):
     canonical_id = Column(String, nullable=True)
     target_mastery = Column(Float)
     knowledge_category = Column(String, nullable=True) # framework, language, platform, concept
+    team_relevance = Column(Float, default=0.0)
+    priority_tier = Column(String, default="T4")
+    reasoning = Column(String, nullable=True)
 
     role = relationship("Role", back_populates="target_skills")
 
