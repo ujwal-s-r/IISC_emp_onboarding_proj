@@ -6,6 +6,7 @@ import { EmployerFormPanel } from "@/components/home/EmployerFormPanel";
 import { ResumePanel } from "@/components/home/ResumePanel";
 import { EventTree } from "@/components/home/EventTree";
 import { HistoryDropdown } from "@/components/home/HistoryDropdown";
+import { JourneyTrackGraphs } from "@/components/home/JourneyTrackGraphs";
 import { useEmployerPipeline } from "@/hooks/useEmployerPipeline";
 import { useEmployeePipeline } from "@/hooks/useEmployeePipeline";
 import { API_BASE } from "@/lib/config";
@@ -84,6 +85,16 @@ export default function HomePage() {
       rightPane: `${base} ${rightFlex} ${rightStyle}`.trim(),
     };
   }, [layoutFocus]);
+
+  const journeyData = useMemo(() => {
+    for (let i = employeeEvents.length - 1; i >= 0; i--) {
+      const ev = employeeEvents[i];
+      if (ev.phase === "journey" && ev.type === "result" && ev.step === "journey_ready") {
+        return ev.data;
+      }
+    }
+    return null;
+  }, [employeeEvents]);
 
   return (
     <div className="relative z-10 mx-auto max-w-[1920px] px-3 py-6 sm:px-5 lg:px-8 lg:py-8">
@@ -252,6 +263,8 @@ export default function HomePage() {
           />
         </section>
       </div>
+
+      {journeyData ? <JourneyTrackGraphs journeyData={journeyData} /> : null}
 
       <p className="mt-6 text-center text-[11px] text-white/30 md:hidden">
         Tip: rotate to landscape or widen the window for the full split layout.

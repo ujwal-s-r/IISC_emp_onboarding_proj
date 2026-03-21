@@ -104,9 +104,7 @@ export function useEmployeePipeline(
               : {};
 
           if (type === "stream_chunk") {
-            if (phase === "resume_extraction") {
-              employeeRunActiveRef.current = true;
-            }
+            employeeRunActiveRef.current = true;
             if (!employeeRunActiveRef.current) return;
             const chunkType = String(data.chunk_type ?? "");
             const text = String(data.text ?? "");
@@ -138,12 +136,17 @@ export function useEmployeePipeline(
             phase === "normalization" ||
             phase === "mastery" ||
             phase === "gap" ||
+            phase === "dependency" ||
             phase === "path" ||
             phase === "journey"
           ) {
             setLayoutFocus("resume");
           }
-          if (phase === "db" && type === "complete") {
+          if (
+            phase === "db" &&
+            type === "complete" &&
+            step === "employee_persist_done"
+          ) {
             setPipelineDone(true);
             setLayoutFocus("resume");
             employeeRunActiveRef.current = false;

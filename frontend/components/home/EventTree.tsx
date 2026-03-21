@@ -177,10 +177,30 @@ function streamSignature(streams: Record<string, StreamBuffers>): string {
   return s;
 }
 
+function phaseStreamEntries(
+  streams: Record<string, StreamBuffers>,
+  phase: string
+): Array<{ key: string; step: string; reasoning: string; content: string }> {
+  const out: Array<{ key: string; step: string; reasoning: string; content: string }> = [];
+  const prefix = `${phase}::`;
+  for (const k of Object.keys(streams)) {
+    if (!k.startsWith(prefix)) continue;
+    const v = streams[k];
+    if (!v.reasoning && !v.content) continue;
+    out.push({
+      key: k,
+      step: k.slice(prefix.length) || "stream",
+      reasoning: v.reasoning,
+      content: v.content,
+    });
+  }
+  return out;
+}
+
 export function EventTree({
   events,
   streams,
-  streamKey,
+  streamKey: _streamKey,
   wsOpen,
   wsStatus,
   scrollParentRef,
@@ -202,59 +222,40 @@ export function EventTree({
     return m;
   }, [events]);
 
+  const streamsByPhase = useMemo(() => {
+    const m: Partial<Record<Phase, Array<{ key: string; step: string; reasoning: string; content: string }>>> = {};
+    for (const p of PHASE_ORDER) {
+      m[p] = phaseStreamEntries(streams, p);
+    }
+    return m;
+  }, [streams]);
+
   const livePhase = useMemo((): Phase | null => {
-    const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-    const skTeam = streamKey("team_context", "team_analysis_streaming");
-
-    const jdEnded = events.some(
-      (e) =>
-        e.phase === "jd_extraction" &&
-        e.type === "stream_end" &&
-        e.step === "llm_extraction_streaming"
-    );
-    const teamEnded = events.some(
-      (e) =>
-        e.phase === "team_context" &&
-        e.type === "stream_end" &&
-        e.step === "team_analysis_streaming"
-    );
-
-    const jdBuf = streams[skJd];
-    const teamBuf = streams[skTeam];
-    const jdStreaming =
-      !jdEnded &&
-      Boolean(
-        (jdBuf?.reasoning && jdBuf.reasoning.length > 0) ||
-          (jdBuf?.content && jdBuf.content.length > 0)
-      );
-    const teamStreaming =
-      !teamEnded &&
-      Boolean(
-        (teamBuf?.reasoning && teamBuf.reasoning.length > 0) ||
-          (teamBuf?.content && teamBuf.content.length > 0)
-      );
-
-    if (jdStreaming) return "jd_extraction";
-    if (teamStreaming) return "team_context";
+    for (let i = PHASE_ORDER.length - 1; i >= 0; i--) {
+      const phase = PHASE_ORDER[i];
+      const streamEntries = streamsByPhase[phase] ?? [];
+      const hasLiveStream = streamEntries.some((entry) => {
+        const ended = events.some(
+          (e) => e.phase === phase && e.type === "stream_end" && e.step === entry.step
+        );
+        return !ended && Boolean(entry.reasoning || entry.content);
+      });
+      if (hasLiveStream) return phase;
+    }
 
     const last = events[events.length - 1];
     if (last && isPhase(last.phase)) return last.phase;
 
     if (wsOpen || wsStatus === "connecting") return "jd_extraction";
     return null;
-  }, [events, streams, streamKey, wsOpen, wsStatus]);
+  }, [events, streamsByPhase, wsOpen, wsStatus]);
 
   const activeStepScrollTarget = useMemo((): string | null => {
-    const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-    const skTeam = streamKey("team_context", "team_analysis_streaming");
-    const jdBuf = streams[skJd];
-    const teamBuf = streams[skTeam];
-
-    if ((jdBuf?.reasoning || jdBuf?.content) && wsStatus !== "closed") {
-      return "stream-jd";
-    }
-    if ((teamBuf?.reasoning || teamBuf?.content) && wsStatus !== "closed") {
-      return "stream-team";
+    if (livePhase) {
+      const entries = streamsByPhase[livePhase] ?? [];
+      if (entries.length) {
+        return `stream:${entries[entries.length - 1].key}`;
+      }
     }
 
     const last = events[events.length - 1];
@@ -274,7 +275,7 @@ export function EventTree({
       return "team-result";
     }
     return last.id;
-  }, [events, streams, streamKey, wsStatus]);
+  }, [events, livePhase, streamsByPhase]);
 
   const streamSig = useMemo(() => streamSignature(streams), [streams]);
 
@@ -340,11 +341,10 @@ export function EventTree({
     <div className="space-y-4">
       {PHASE_ORDER.map((phase) => {
         const phaseEvents = byPhase[phase] ?? [];
+        const streamEntries = streamsByPhase[phase] ?? [];
         const isActive =
           livePhase === phase &&
           (wsOpen || wsStatus === "connecting" || phaseEvents.length > 0);
-        const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-        const skTeam = streamKey("team_context", "team_analysis_streaming");
 
         return (
           <Collapsible
@@ -376,24 +376,19 @@ export function EventTree({
                   }
                   return <LogRow key={e.id} ev={e} />;
                 })}
-                {(streams[skJd]?.reasoning || streams[skJd]?.content) && (
+                {streamEntries.map((entry) => (
                   <div
-                    data-orch-step="stream-jd"
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
                     className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3"
                   >
                     <p className="text-xs font-medium text-violet-200/90">
-                      Live LLM stream
+                      Live stream · {entry.step}
                     </p>
-                    <StreamBlock
-                      title="Reasoning trace"
-                      text={streams[skJd]?.reasoning ?? ""}
-                    />
-                    <StreamBlock
-                      title="Model output (JSON)"
-                      text={streams[skJd]?.content ?? ""}
-                    />
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output (JSON)" text={entry.content} />
                   </div>
-                )}
+                ))}
                 {jdResult ? (
                   <div
                     data-orch-step="jd-result"
@@ -485,24 +480,19 @@ export function EventTree({
                   }
                   return <LogRow key={e.id} ev={e} />;
                 })}
-                {(streams[skTeam]?.reasoning || streams[skTeam]?.content) && (
+                {streamEntries.map((entry) => (
                   <div
-                    data-orch-step="stream-team"
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
                     className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3"
                   >
                     <p className="text-xs font-medium text-sky-200/90">
-                      Live team analysis stream
+                      Live stream · {entry.step}
                     </p>
-                    <StreamBlock
-                      title="Reasoning trace"
-                      text={streams[skTeam]?.reasoning ?? ""}
-                    />
-                    <StreamBlock
-                      title="Model output"
-                      text={streams[skTeam]?.content ?? ""}
-                    />
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output" text={entry.content} />
                   </div>
-                )}
+                ))}
                 {teamResult ? (
                   <div
                     data-orch-step="team-result"
@@ -550,6 +540,19 @@ export function EventTree({
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
                 ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3"
+                  >
+                    <p className="text-xs font-medium text-amber-200/90">
+                      Live stream · {entry.step}
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output" text={entry.content} />
+                  </div>
+                ))}
                 {masteryResult?.data?.skills &&
                 Array.isArray(masteryResult.data.skills) ? (
                   <div className="overflow-x-auto rounded-xl border border-white/10">
@@ -595,6 +598,43 @@ export function EventTree({
               <div className="space-y-2">
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
+                ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-white/20 bg-white/[0.04] p-3"
+                  >
+                    <p className="text-xs font-medium text-white/80">
+                      Live stream · {entry.step}
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output" text={entry.content} />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {phase === "resume_extraction" ||
+            phase === "gap" ||
+            phase === "path" ||
+            phase === "journey" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => (
+                  <LogRow key={e.id} ev={e} />
+                ))}
+                {streamEntries.map((entry) => (
+                  <div
+                    key={entry.key}
+                    data-orch-step={`stream:${entry.key}`}
+                    className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3"
+                  >
+                    <p className="text-xs font-medium text-indigo-200/90">
+                      Live stream · {entry.step}
+                    </p>
+                    <StreamBlock title="Reasoning trace" text={entry.reasoning} />
+                    <StreamBlock title="Model output" text={entry.content} />
+                  </div>
                 ))}
               </div>
             ) : null}
