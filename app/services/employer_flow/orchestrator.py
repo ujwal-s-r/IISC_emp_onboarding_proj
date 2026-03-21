@@ -181,6 +181,9 @@ async def orchestrate_employer_flow(
         JD_EXTRACTION_PROMPT.format(jd_text=jd_text),
         temperature=1,
         max_tokens=16384,
+        role_id=role_id,
+        phase="jd_extraction",
+        step_name="llm_extraction_streaming"
     )
     logger.info(f"[Orchestrator] JD LLM raw content:\n{raw_llm_output}")
     logger.info(f"[Orchestrator] JD LLM reasoning (first 200):\n{jd_reasoning[:200]}")
@@ -233,6 +236,9 @@ async def orchestrate_employer_flow(
             ),
             temperature=1,
             max_tokens=16384,
+            role_id=role_id,
+            phase="team_context",
+            step_name="team_analysis_streaming"
         )
         logger.info(f"[Orchestrator] Team context content:\n{raw_team_output}")
         logger.info(f"[Orchestrator] Team context reasoning (first 300):\n{team_reasoning[:300]}")

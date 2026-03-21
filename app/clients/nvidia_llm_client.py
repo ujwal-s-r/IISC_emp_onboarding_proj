@@ -14,9 +14,11 @@ Both models are used in streaming mode to capture:
 
 These are accumulated separately and returned as (reasoning, content) tuples.
 """
+from typing import Optional
 from openai import AsyncOpenAI
 from app.config import settings
 from app.utils.logger import logger
+from app.clients.redis_client import redis_client
 
 
 JUDGE_MODEL        = "openai/gpt-oss-20b"
@@ -38,12 +40,19 @@ class NvidiaLLMClient:
         )
         logger.info(f"NvidiaLLMClient initialized with model: {self.model}")
 
-    async def stream(self, prompt: str, temperature: float = 0.0, max_tokens: int = 4096):
+    async def stream(
+        self,
+        prompt: str,
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        role_id: Optional[str] = None,
+        phase: Optional[str] = None,
+        step_name: Optional[str] = "llm_streaming"
+    ):
         """
         Stream from the Nvidia API.
+        If role_id and phase are provided, emits live 'stream_chunk' events to Redis.
         Returns (reasoning: str, content: str) tuple.
-        reasoning is the model's internal chain-of-thought (may be empty).
-        content is the model's final reply.
         """
         try:
             completion = await self.client.chat.completions.create(
@@ -64,13 +73,33 @@ class NvidiaLLMClient:
                 delta = chunk.choices[0].delta
                 r = getattr(delta, "reasoning_content", None)
                 c = getattr(delta, "content", None)
+                
                 if r:
                     reasoning_chunks.append(r)
+                    if role_id and phase:
+                        await redis_client.publish_event(
+                            role_id=role_id, phase=phase, event_type="stream_chunk",
+                            step=step_name, message="", model=self.model,
+                            data={"chunk_type": "reasoning", "text": r}
+                        )
                 if c:
                     content_chunks.append(c)
+                    if role_id and phase:
+                        await redis_client.publish_event(
+                            role_id=role_id, phase=phase, event_type="stream_chunk",
+                            step=step_name, message="", model=self.model,
+                            data={"chunk_type": "content", "text": c}
+                        )
 
             reasoning = "".join(reasoning_chunks).strip()
             content   = "".join(content_chunks).strip()
+
+            if role_id and phase:
+                await redis_client.publish_event(
+                    role_id=role_id, phase=phase, event_type="stream_end",
+                    step=step_name, message="Stream complete", model=self.model,
+                    data={"reasoning_length": len(reasoning), "content_length": len(content)}
+                )
 
             if not content:
                 logger.warning(f"[NvidiaLLMClient:{self.model}] Stream returned empty content.")
@@ -83,10 +112,7 @@ class NvidiaLLMClient:
             return "", "NONE"
 
     async def complete(self, prompt: str, max_tokens: int = 4096) -> str:
-        """
-        Legacy compatibility: accumulate BOTH reasoning + content into one string.
-        Used by skill_normalizer where we feed the full text to the regex parser.
-        """
+        """ Legacy compatibility for the normalizer LLM judge. """
         reasoning, content = await self.stream(prompt, max_tokens=max_tokens)
         combined = (reasoning + "\n" + content).strip() if reasoning else content
         return combined if combined else "NONE"

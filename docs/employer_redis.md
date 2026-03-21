@@ -57,13 +57,44 @@ This document defines every event emitted to Redis during the Employer Setup Flo
 }
 ```
 
-### 4. LLM Skill Extraction Result
+### 4. Live Streaming Chunks (Fires multiple times)
+As the model generates text, it rapidly fires these events:
+```json
+{
+  "phase": "jd_extraction", "type": "stream_chunk",
+  "step": "llm_extraction_streaming",
+  "message": "",
+  "model": "stepfun-ai/step-3.5-flash",
+  "data": {
+    "chunk_type": "reasoning", // or "content"
+    "text": "The JD explicitly states..."
+  }
+}
+```
+
+### 5. Stream Completion
+Fires once the LLM finishes generating.
+```json
+{
+  "phase": "jd_extraction", "type": "stream_end",
+  "step": "llm_extraction_streaming",
+  "message": "Stream complete",
+  "model": "stepfun-ai/step-3.5-flash",
+  "data": {
+    "reasoning_length": 1500,
+    "content_length": 800
+  }
+}
+```
+
+### 6. Final LLM Extraction Result
+Fires immediately after `stream_end`, containing the fully parsed and structured JSON array of skills.
 ```json
 {
   "phase": "jd_extraction", "type": "result",
   "step": "llm_extraction_done",
   "message": "LLM extracted 8 raw skills",
-  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "model": "stepfun-ai/step-3.5-flash",
   "data": {
     "raw_count": 8,
     "reasoning": "The JD specifically mentions PySpark in the responsibilities section...",
@@ -158,24 +189,50 @@ This document defines every event emitted to Redis during the Employer Setup Flo
 
 ## Phase 3: `team_context`
 
-### 10. Team Context Analysis Start
+### 12. Team Context Analysis Start
 ```json
 {
   "phase": "team_context", "type": "start",
   "step": "team_analysis_start",
   "message": "Sending skills + Team Context to LLM",
-  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "model": "stepfun-ai/step-3.5-flash",
   "data": {}
 }
 ```
 
-### 11. Team Context LLM Result
+### 13. Live Streaming Chunks (Fires multiple times)
+```json
+{
+  "phase": "team_context", "type": "stream_chunk",
+  "step": "team_analysis_streaming",
+  "message": "",
+  "model": "stepfun-ai/step-3.5-flash",
+  "data": {
+    "chunk_type": "reasoning", // or "content"
+    "text": "The team doc mentions using PySpark for ETL..."
+  }
+}
+```
+
+### 14. Stream Completion
+```json
+{
+  "phase": "team_context", "type": "stream_end",
+  "step": "team_analysis_streaming",
+  "message": "Stream complete",
+  "model": "stepfun-ai/step-3.5-flash",
+  "data": { }
+}
+```
+
+### 15. Final Team Context LLM Result
+Fires containing the parsed signals for tiering.
 ```json
 {
   "phase": "team_context", "type": "result",
   "step": "team_analysis_done",
   "message": "Team Context analysis complete. 5 skills found active in team.",
-  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "model": "stepfun-ai/step-3.5-flash",
   "data": {
     "reasoning": "PySpark is mentioned in the Q1 project tracker under active ETL pipelines...",
     "signals": [
@@ -214,18 +271,7 @@ This document defines every event emitted to Redis during the Employer Setup Flo
 
 ---
 
-## Phase 5: `db`
-
-### 13. Persist Started
-```json
-{
-  "phase": "db", "type": "log",
-  "step": "db_persist_start",
-  "message": "Saving all skill metrics to SQLite"
-}
-```
-
-### 14. Persist Complete
+### 18. Persist Complete
 ```json
 {
   "phase": "db", "type": "complete",
