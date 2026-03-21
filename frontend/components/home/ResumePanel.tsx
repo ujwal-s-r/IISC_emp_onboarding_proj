@@ -6,11 +6,15 @@ import { employeeOnboardUrl } from "@/lib/config";
 export function ResumePanel({
   roleId,
   compact,
+  emphasized,
   disabled,
+  onUserActivate,
 }: {
   roleId: string | null;
   compact?: boolean;
+  emphasized?: boolean;
   disabled?: boolean;
+  onUserActivate?: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -50,9 +54,17 @@ export function ResumePanel({
 
   return (
     <div
-      className={`flex flex-col rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-md transition-all ${
-        compact ? "lg:scale-[0.98] lg:opacity-90" : ""
-      }`}
+      role="region"
+      tabIndex={-1}
+      onPointerDown={() => onUserActivate?.()}
+      onFocusCapture={() => onUserActivate?.()}
+      className={`flex h-full min-h-[220px] flex-col rounded-xl border border-white/10 bg-white/[0.04] p-5 shadow-inner shadow-black/20 backdrop-blur-xl transition-all duration-500 md:min-h-0 ${
+        compact ? "md:scale-[0.985]" : ""
+      } ${
+        emphasized
+          ? "border-white/20 ring-1 ring-white/20 ring-offset-2 ring-offset-transparent"
+          : ""
+      } `}
     >
       <p className="text-xs font-semibold uppercase tracking-wider text-white/45">
         Employee resume

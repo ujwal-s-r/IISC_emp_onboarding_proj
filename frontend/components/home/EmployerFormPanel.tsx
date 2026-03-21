@@ -96,19 +96,26 @@ export function EmployerFormPanel({
             Team context
           </p>
           <p className="mt-1 text-xs text-white/35">
-            One document: PDF or text export (required).
+            Upload a file or paste text (at least one).
           </p>
           <label className="mt-3 flex flex-col gap-1.5 text-sm">
-            <span className="text-white/70">
-              Team context file <span className="text-rose-400">*</span>
-            </span>
+            <span className="text-white/60">Team context file</span>
             <input
               name="team_context_file"
               type="file"
-              required
               accept=".pdf,.txt,application/pdf,text/plain"
               disabled={disabled}
               className="text-xs text-white/60 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-white/80"
+            />
+          </label>
+          <label className="mt-3 flex flex-col gap-1.5 text-sm">
+            <span className="text-white/60">Team context text</span>
+            <textarea
+              name="team_context_text"
+              rows={5}
+              placeholder="Paste team context here if not uploading a file…"
+              disabled={disabled}
+              className="resize-y rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none ring-white/20 focus:ring-2 disabled:opacity-50"
             />
           </label>
         </div>

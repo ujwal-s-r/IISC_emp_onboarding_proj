@@ -26,6 +26,5 @@ openai
 websockets
 pytest
 pytest-asyncio
-httpx
-kaglehub
+kagglehub
 redis
