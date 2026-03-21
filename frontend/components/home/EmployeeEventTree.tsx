@@ -70,6 +70,9 @@ function AutoScrollPre({
     const el = ref.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
   }, [text]);
 
   return (
@@ -334,7 +337,7 @@ export function EmployeeEventTree({
           ? CSS.escape(activeStepScrollTarget)
           : activeStepScrollTarget.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const el = root.querySelector(`[data-orch-step="${safe}"]`);
-      el?.scrollIntoView({ block: "nearest", behavior: "auto" });
+      el?.scrollIntoView({ block: "end", behavior: "auto" });
     });
   }, [activeStepScrollTarget, streamSig, scrollParentRef, livePhase]);
 
@@ -406,7 +409,7 @@ export function EmployeeEventTree({
 
         return (
           <Collapsible
-            key={phase}
+            key={`${phase}:${isActive ? "live" : "idle"}`}
             defaultOpen={Boolean(isActive)}
             title={EMPLOYEE_PHASE_LABEL[phase]}
             subtitle={
