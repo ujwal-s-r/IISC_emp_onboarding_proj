@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# Jupyter / ML artefacts
+machine_learning/
+*.ipynb_checkpoints/
+models/
+data/nb2_outputs/
+data/nb3_outputs/
+
+# Secrets — NEVER bake into image
+.env
+
+# IDE / OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Logs (written to volume at runtime)
+logs/
+*.log
+
+# SQLite DB (mounted as volume)
+DB/
+app/db/*.db
+
+# Test / temp files
+temp/
+tests/
+.pytest_cache/
+
+# Frontend: node_modules and build output handled inside Docker
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Git
+.git/
+.gitignore

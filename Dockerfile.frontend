@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AdaptIQ — Frontend Dockerfile (Next.js 15 — standalone output)
+# Multi-stage: build → production runner (minimal image)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: Install deps ─────────────────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --frozen-lockfile
+
+# ── Stage 2: Build ───────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /frontend
+COPY --from=deps /frontend/node_modules ./node_modules
+COPY frontend/ .
+
+# Tell Next.js to produce a standalone self-contained server bundle
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ── Stage 3: Production runner ────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /frontend
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Standalone output contains everything needed to run — no node_modules required
+COPY --from=builder /frontend/.next/standalone ./
+COPY --from=builder /frontend/.next/static ./.next/static
+COPY --from=builder /frontend/public ./public
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD wget -qO- http://localhost:3000 || exit 1
+
+CMD ["node", "server.js"]

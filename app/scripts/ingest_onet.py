@@ -32,9 +32,10 @@ from app.clients.embedding_client import EmbeddingClient
 from app.config import settings
 
 # ── RESUME FLAGS ─────────────────────────────────────────────────────────────
-SKIP_PHASE_1 = True   # Occupations already done
-SKIP_PHASE_2 = True   # Technologies already done
-SKIP_PHASE_3 = False  # Skipped mid-way, run this!
+SKIP_PHASE_1 = True   # Occupations — skip Neo4j (already in graph)
+SKIP_PHASE_2 = False  # Technologies — Qdrant-only re-upload (8,749 tech vectors)
+SKIP_PHASE_3 = False  # Skills Qdrant-only re-upload (35 skill elements)
+QDRANT_ONLY  = True   # Skip all Neo4j writes; only upsert to Qdrant
 # ─────────────────────────────────────────────────────────────────────────────
 
 ONET_DIR = Path(r"C:\Users\USR005\.cache\kagglehub\datasets\emarkhauser\onet-29-0-database\versions\1\db_29_0_text")
@@ -99,6 +100,106 @@ def ingest_technologies(gc: GraphClient, vc: VectorClient, ec: EmbeddingClient, 
         print("[Phase 2] Skipping Technologies (already done).")
         return
 
+    # Build unique technology records keyed by normalised canonical_id
+    tech_by_cid: Dict[str, dict] = {}
+    for row in rows:
+        example = row.get("Example", "").strip()
+        if not example:
+            continue
+        cid = f"TECH_{normalize_name(example)}"
+        if cid not in tech_by_cid:
+            tech_by_cid[cid] = {
+                "canonical_id":    cid,
+                "name":            example,
+                "type":            "tech",
+                "commodity_title": row.get("Commodity Title", "").strip(),
+                "hot_technology":  row.get("Hot Technology", "N").strip() == "Y",
+                "in_demand":       row.get("In Demand", "N").strip() == "Y",
+            }
+
+    unique_techs = list(tech_by_cid.values())
+    total = len(unique_techs)
+    print(f"\n[Phase 2] {total} unique technology examples to process …")
+
+    if not QDRANT_ONLY:
+        # ── Neo4j nodes + relationships ──
+        def merge_tech_nodes(tx, batch):
+            tx.run(
+                """
+                UNWIND $batch AS t
+                MERGE (tech:Technology {canonical_id: t.canonical_id})
+                SET tech.name            = t.name,
+                    tech.commodity_title = t.commodity_title,
+                    tech.hot_technology  = t.hot_technology,
+                    tech.in_demand       = t.in_demand
+                """,
+                batch=batch,
+            )
+
+        soc_to_techs: Dict[str, list] = defaultdict(list)
+        for row in rows:
+            soc = row.get("O*NET-SOC Code", "").strip()
+            example = row.get("Example", "").strip()
+            if soc and example:
+                cid = f"TECH_{normalize_name(example)}"
+                soc_to_techs[soc].append(cid)
+
+        t0 = time.time()
+        with gc.driver.session(database=settings.NEO4J_DATABASE) as session:
+            print("  Merging Technology nodes into Neo4j …")
+            for chunk in chunker(unique_techs, NEO4J_BATCH_SIZE):
+                session.execute_write(merge_tech_nodes, chunk)
+            progress("Tech Nodes", total, total, time.time() - t0)
+
+            rel_data = [
+                {"occ_cid": soc_map[soc], "tech_cid": cid}
+                for soc, cids in soc_to_techs.items()
+                if soc in soc_map
+                for cid in cids
+            ]
+
+            def merge_tech_rels(tx, batch):
+                tx.run(
+                    """
+                    UNWIND $batch AS b
+                    MATCH (o:Occupation {canonical_id: b.occ_cid})
+                    MATCH (t:Technology  {canonical_id: b.tech_cid})
+                    MERGE (o)-[:USES_TECH]->(t)
+                    """,
+                    batch=batch,
+                )
+
+            t1 = time.time()
+            done = 0
+            for chunk in chunker(rel_data, NEO4J_BATCH_SIZE):
+                try:
+                    session.execute_write(merge_tech_rels, chunk)
+                except (ServiceUnavailable, SessionExpired):
+                    session = gc.driver.session(database=settings.NEO4J_DATABASE)
+                    session.execute_write(merge_tech_rels, chunk)
+                done += len(chunk)
+                if done % (NEO4J_BATCH_SIZE * 5) == 0 or done == len(rel_data):
+                    progress("Tech-Rels", done, len(rel_data), time.time() - t1)
+    else:
+        print("  [QDRANT_ONLY] Skipping Neo4j — uploading Technologies to Qdrant only.")
+
+    # ── Qdrant upsert ──
+    print(f"  Upserting {total} Technologies to Qdrant …")
+    t2 = time.time()
+    for batch_start in range(0, total, BATCH_SIZE):
+        batch = unique_techs[batch_start: batch_start + BATCH_SIZE]
+        vecs  = ec.embed_documents([b["name"] for b in batch])
+        points = [
+            qdrant_models.PointStruct(
+                id=str(uuid.uuid5(uuid.NAMESPACE_DNS, b["canonical_id"])),
+                vector=v,
+                payload=b,
+            )
+            for b, v in zip(batch, vecs)
+        ]
+        vc.client.upsert(collection_name=COLLECTION_NAME, points=points)
+        progress("Tech→Qdrant", min(batch_start + len(batch), total), total, time.time() - t2)
+
 
 # ── Phase 3 ─────────────────────────────────────────────────────────────────
 def ingest_skills(gc: GraphClient, vc: VectorClient, ec: EmbeddingClient, rows: List[Dict], soc_map: Dict[str, str]):
@@ -108,75 +209,82 @@ def ingest_skills(gc: GraphClient, vc: VectorClient, ec: EmbeddingClient, rows: 
 
     print(f"\n[Phase 3] Processing {len(rows)} Skill rows …")
     skill_by_id = {}
-    soc_to_skills = defaultdict(list)
     for row in rows:
-        soc, eid, ename, sid, val = row.get("O*NET-SOC Code"), row.get("Element ID"), row.get("Element Name"), row.get("Scale ID"), row.get("Data Value")
+        eid, ename = row.get("Element ID"), row.get("Element Name")
         if not eid or not ename: continue
         cid = f"EL_{eid.replace('.', '_')}"
-        if cid not in skill_by_id: skill_by_id[cid] = {"canonical_id": cid, "element_id": eid, "name": ename}
-        if soc and sid in ("IM", "LV"): soc_to_skills[soc].append({"cid": cid, "sid": sid, "val": float(val or 0)})
+        if cid not in skill_by_id:
+            skill_by_id[cid] = {"canonical_id": cid, "element_id": eid, "name": ename}
 
     unique_skills = list(skill_by_id.values())
     total = len(unique_skills)
 
-    # ── Neo4j Nodes Bulk ──
-    t0 = time.time()
-    def merge_skills_bulk(tx, batch):
-        tx.run(
-            """
-            UNWIND $batch AS s
-            MERGE (sk:Skill {canonical_id: s.canonical_id})
-            SET sk.element_id = s.element_id, sk.name = s.name
-            """,
-            batch=batch
-        )
+    if not QDRANT_ONLY:
+        # ── Neo4j Nodes Bulk ──
+        t0 = time.time()
+        soc_to_skills = defaultdict(list)
+        for row in rows:
+            soc, eid, sid, val = row.get("O*NET-SOC Code"), row.get("Element ID"), row.get("Scale ID"), row.get("Data Value")
+            if soc and eid and sid in ("IM", "LV"):
+                cid = f"EL_{eid.replace('.', '_')}"
+                soc_to_skills[soc].append({"cid": cid, "sid": sid, "val": float(val or 0)})
 
-    with gc.driver.session(database=settings.NEO4J_DATABASE) as session:
-        print("  Merging Skill nodes into Neo4j using UNWIND …")
-        for chunk in chunker(unique_skills, NEO4J_BATCH_SIZE):
-            session.execute_write(merge_skills_bulk, chunk)
-        progress("Skills Nodes", total, total, time.time()-t0)
-
-        # ── Neo4j Relationships Bulk ──
-        print("  Creating skill relationships using UNWIND …")
-        agg = {}
-        for soc, ds in soc_to_skills.items():
-            if soc not in soc_map: continue
-            for d in ds:
-                key = (soc_map[soc], d["cid"])
-                if key not in agg: agg[key] = {"cid": d["cid"], "occ_cid": soc_map[soc], "imp": 0.0, "lv": 0.0}
-                if d["sid"] == "IM": agg[key]["imp"] = d["val"]
-                else: agg[key]["lv"] = d["val"]
-        
-        agg_list = list(agg.values())
-        t1 = time.time()
-
-        def merge_skill_rels_bulk(tx, batch):
+        def merge_skills_bulk(tx, batch):
             tx.run(
                 """
-                UNWIND $batch AS b
-                MATCH (o:Occupation {canonical_id: b.occ_cid})
-                MATCH (sk:Skill {canonical_id: b.cid})
-                MERGE (o)-[r:REQUIRES_SKILL]->(sk)
-                SET r.importance = b.imp, r.level = b.lv
+                UNWIND $batch AS s
+                MERGE (sk:Skill {canonical_id: s.canonical_id})
+                SET sk.element_id = s.element_id, sk.name = s.name
                 """,
                 batch=batch
             )
 
-        done_rels = 0
-        for chunk in chunker(agg_list, NEO4J_BATCH_SIZE):
-            try:
-                session.execute_write(merge_skill_rels_bulk, chunk)
-            except (ServiceUnavailable, SessionExpired):
-                print(f"\n  [Retry] Connection lost. Reconnecting...")
-                session = gc.driver.session(database=settings.NEO4J_DATABASE)
-                session.execute_write(merge_skill_rels_bulk, chunk)
-            done_rels += len(chunk)
-            if done_rels % (NEO4J_BATCH_SIZE * 5) == 0 or done_rels == len(agg_list):
-                progress("Skill-Rels", done_rels, len(agg_list), time.time()-t1)
+        with gc.driver.session(database=settings.NEO4J_DATABASE) as session:
+            print("  Merging Skill nodes into Neo4j using UNWIND …")
+            for chunk in chunker(unique_skills, NEO4J_BATCH_SIZE):
+                session.execute_write(merge_skills_bulk, chunk)
+            progress("Skills Nodes", total, total, time.time()-t0)
+
+            print("  Creating skill relationships using UNWIND …")
+            agg = {}
+            for soc, ds in soc_to_skills.items():
+                if soc not in soc_map: continue
+                for d in ds:
+                    key = (soc_map[soc], d["cid"])
+                    if key not in agg: agg[key] = {"cid": d["cid"], "occ_cid": soc_map[soc], "imp": 0.0, "lv": 0.0}
+                    if d["sid"] == "IM": agg[key]["imp"] = d["val"]
+                    else: agg[key]["lv"] = d["val"]
+            agg_list = list(agg.values())
+            t1 = time.time()
+
+            def merge_skill_rels_bulk(tx, batch):
+                tx.run(
+                    """
+                    UNWIND $batch AS b
+                    MATCH (o:Occupation {canonical_id: b.occ_cid})
+                    MATCH (sk:Skill {canonical_id: b.cid})
+                    MERGE (o)-[r:REQUIRES_SKILL]->(sk)
+                    SET r.importance = b.imp, r.level = b.lv
+                    """,
+                    batch=batch
+                )
+
+            done_rels = 0
+            for chunk in chunker(agg_list, NEO4J_BATCH_SIZE):
+                try:
+                    session.execute_write(merge_skill_rels_bulk, chunk)
+                except (ServiceUnavailable, SessionExpired):
+                    print(f"\n  [Retry] Connection lost. Reconnecting...")
+                    session = gc.driver.session(database=settings.NEO4J_DATABASE)
+                    session.execute_write(merge_skill_rels_bulk, chunk)
+                done_rels += len(chunk)
+                if done_rels % (NEO4J_BATCH_SIZE * 5) == 0 or done_rels == len(agg_list):
+                    progress("Skill-Rels", done_rels, len(agg_list), time.time()-t1)
+    else:
+        print("  [QDRANT_ONLY] Skipping all Neo4j writes — uploading to Qdrant only.")
 
     # ── Qdrant upsert ──
-    print("  Upserting Skills to Qdrant …")
+    print(f"  Upserting {total} Skills to Qdrant …")
     t2 = time.time()
     for batch_start in range(0, total, BATCH_SIZE):
         batch = unique_skills[batch_start: batch_start + BATCH_SIZE]
@@ -189,7 +297,8 @@ def ingest_skills(gc: GraphClient, vc: VectorClient, ec: EmbeddingClient, rows: 
 def main():
     print("="*60 + "\n  O*NET Bulk Ingestion (Resumable Version)\n" + "="*60)
     gc, vc, ec = GraphClient(), VectorClient(), EmbeddingClient()
-    if not gc.test_connection() or not vc.test_connection(): sys.exit(1)
+    if not QDRANT_ONLY and not gc.test_connection(): sys.exit(1)
+    if not vc.test_connection(): sys.exit(1)
     ensure_collection(vc)
     occ_rows, tech_rows, skill_rows = read_tsv(OCCUPATION_FILE), read_tsv(TECH_SKILLS_FILE), read_tsv(SKILLS_FILE)
     t_start = time.time()
