@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { EmployerFormPanel } from "@/components/home/EmployerFormPanel";
 import { ResumePanel } from "@/components/home/ResumePanel";
 import { EventTree } from "@/components/home/EventTree";
+import { HistoryDropdown } from "@/components/home/HistoryDropdown";
 import { useEmployerPipeline } from "@/hooks/useEmployerPipeline";
 import { useEmployeePipeline } from "@/hooks/useEmployeePipeline";
 import { API_BASE } from "@/lib/config";
@@ -18,9 +20,15 @@ export default function HomePage() {
     submitError,
     submitState,
     pipelineDone,
+    historicalData,
+    historicalLoading,
+    historicalMode,
+    resetVersion,
     layoutFocus,
     setLayoutFocus,
     startAnalysis,
+    loadRoleById,
+    resetAll,
   } = useEmployerPipeline();
 
   const {
@@ -36,8 +44,36 @@ export default function HomePage() {
 
   const busy = wsStatus === "connecting" || wsStatus === "open";
   const wsOpen = wsStatus === "open";
+  const router = useRouter();
 
   const orchestrationScrollRef = useRef<HTMLDivElement>(null);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    const fromUrl =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("role")
+        : null;
+    if (fromUrl) {
+      void loadRoleById(fromUrl);
+    }
+  }, [loadRoleById]);
+
+  useEffect(() => {
+    const currentRole =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("role")
+        : null;
+    if (roleId && roleId !== currentRole) {
+      router.replace(`/?role=${encodeURIComponent(roleId)}`);
+      return;
+    }
+    if (!roleId && currentRole) {
+      router.replace("/");
+    }
+  }, [roleId, router]);
 
   const { leftPane, rightPane } = useMemo(() => {
     const base =
@@ -79,17 +115,31 @@ export default function HomePage() {
 
   return (
     <div className="relative z-10 mx-auto max-w-[1920px] px-3 py-6 sm:px-5 lg:px-8 lg:py-8">
-      <header className="mb-6 max-w-4xl">
-        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-          Role intelligence
-        </h1>
-        <p className="mt-3 text-sm leading-relaxed text-white/50 sm:text-base">
-          <span className="text-white/65">Split workspace</span> — employer (JD, team
-          context, live phases) on the left; resume track on the right. From tablet size
-          up, both columns stay side by side; focus shifts automatically while the pipeline
-          runs, and you can override anytime.
-        </p>
-        <p className="mt-2 font-mono text-[11px] text-white/35">API: {API_BASE}</p>
+      <header className="mb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="max-w-4xl">
+            <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+              Role intelligence
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-white/50 sm:text-base">
+              <span className="text-white/65">Split workspace</span> — employer (JD, team
+              context, live phases) on the left; resume track on the right. From tablet size
+              up, both columns stay side by side; focus shifts automatically while the pipeline
+              runs, and you can override anytime.
+            </p>
+            <p className="mt-2 font-mono text-[11px] text-white/35">API: {API_BASE}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              resetAll();
+              router.replace("/");
+            }}
+            className="rounded-xl border border-white/20 bg-white/[0.08] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+          >
+            + New Analysis
+          </button>
+        </div>
       </header>
 
       <div className="glass-toolbar mb-5">
@@ -110,6 +160,14 @@ export default function HomePage() {
             {m === "balanced" ? "Balanced" : m === "employer" ? "Role setup" : "Resume"}
           </button>
         ))}
+        <HistoryDropdown
+          currentRoleId={roleId}
+          onSelect={(id) => {
+            router.replace(`/?role=${encodeURIComponent(id)}`);
+            void loadRoleById(id);
+          }}
+          disabled={busy || historicalLoading}
+        />
         <span className="ml-auto font-mono text-[11px] text-white/40">
           Role WS: {wsStatus}
           {busy ? " · pipeline" : ""}
@@ -152,11 +210,28 @@ export default function HomePage() {
                   Connected. Streaming live phases and steps from backend events.
                 </p>
               ) : null}
+              {historicalMode && historicalData ? (
+                <p className="mt-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-xs text-white/70">
+                  Loaded historical role <code>{historicalData.id}</code>. You can review the
+                  saved orchestration and still run a new analysis.
+                </p>
+              ) : null}
               <div className="mt-4">
                 <EmployerFormPanel
                   onSubmit={startAnalysis}
                   disabled={busy}
                   error={submitError}
+                  formKey={`${resetVersion}:${roleId ?? "new"}`}
+                  initialValues={
+                    historicalData
+                      ? {
+                          title: historicalData.title,
+                          seniority: historicalData.seniority,
+                          jdText: historicalData.jd_text ?? "",
+                          teamContextText: historicalData.team_context_text ?? "",
+                        }
+                      : null
+                  }
                 />
               </div>
             </div>
@@ -187,6 +262,7 @@ export default function HomePage() {
         {/* Right: resume only */}
         <section className={rightPane} aria-label="Employee resume">
           <ResumePanel
+            key={`resume:${resetVersion}:${roleId ?? "new"}`}
             roleId={roleId}
             compact={layoutFocus === "employer" && busy}
             emphasized={layoutFocus === "resume"}
