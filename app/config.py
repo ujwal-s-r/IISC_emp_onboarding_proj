@@ -9,7 +9,10 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./DB/adaptiq.db"
-
+    
+    # Redis (Event Bus)
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
     # OpenRouter LLM
     OPENROUTER_API_KEY: str = "sk-..."
     LLM_MODEL: str = "nvidia/nemotron-3-super-120b-a12b:free"

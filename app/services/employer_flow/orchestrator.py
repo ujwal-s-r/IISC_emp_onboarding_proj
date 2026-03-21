@@ -1,13 +1,17 @@
 """
 Employer Flow Orchestrator
 ==========================
-Orchestrates the full employer analysis pipeline:
-  1. Parse PDFs
-  2. LLM → raw skills from JD
-  3. Skill Normalization via O*NET backbone (Qdrant -> Neo4j)
-  4. Team Context analysis
-  5. 2D Mastery Matrix computation
-  6. Persist all metrics to SQLite (async)
+Orchestrates the full employer analysis pipeline with fine-grained Redis events
+emitted at every decision point for real-time frontend visibility:
+
+  Phase 1 — jd_extraction:  Parse PDFs → LLM skill extraction
+  Phase 2 — normalization:   O*NET skill normalization (see skill_normalizer.py)
+  Phase 3 — team_context:   LLM team relevance tiering
+  Phase 4 — mastery:        2D Mastery Matrix computation
+  Phase 5 — db:             SQLite persistence
+
+All events are published to Redis channel: channel:{role_id}
+See docs/employer_redis.md for the full JSON event schema.
 """
 import json
 import re
@@ -18,9 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.agent_creator import agent_creator
 from app.services.pdf_service import pdf_service
 from app.services.skill_normalizer import normalize_skills
-from app.api.routers.websocket import manager
+from app.clients.redis_client import redis_client
+from app.clients.nvidia_llm_client import orchestrator_llm_client, ORCHESTRATOR_MODEL
 from app.models.domain import Role, TargetSkill, TeamRelevanceSignal
 from app.utils.logger import logger
+
+# ── Model identifier ────────────────────────────────────────────────────────
+ORCHESTRATOR_MODEL_TAG = ORCHESTRATOR_MODEL
 
 # ── Prompts ─────────────────────────────────────────────────────────────────
 
@@ -45,8 +53,9 @@ Your goal is to find which of the provided 'skills' are actually mentioned in th
 
 For each skill provided in the list that is found in the text, determine:
 1. Recency Category: "current_project", "past_project", or "general". (If currently critical, use current_project).
+2. Reasoning: A brief explanation based on the text of why you assigned this recency.
 
-Output MUST be a valid JSON array of objects with keys: "skill_name", "recency_category".
+Output MUST be a valid JSON array of objects with keys: "skill_name", "recency_category", "reasoning".
 If a skill is NOT found, omit it from the array.
 
 Target Skills to look for:
@@ -84,9 +93,18 @@ def calculate_tier(recency: str) -> str:
     return {"current_project": "T1", "general": "T2", "past_project": "T3"}.get(recency, "T4")
 
 
-# ── Step 3: Normalize skills via O*NET backbone ───────────────────────────────
-# Now delegated to app.services.skill_normalizer (LLM-judge + Qdrant top-3 + auto-create)
-# normalize_skills is imported at top of file.
+# ── Convenience publisher ─────────────────────────────────────────────────────
+
+async def _pub(role_id: str, phase: str, event_type: str, step: str, message: str, data: dict = None, model: str = None):
+    await redis_client.publish_event(
+        role_id=role_id,
+        phase=phase,
+        event_type=event_type,
+        step=step,
+        message=message,
+        model=model,
+        data=data or {}
+    )
 
 
 # ── Step 6: Persist results to SQLite ────────────────────────────────────────
@@ -135,54 +153,106 @@ async def orchestrate_employer_flow(
 ):
     """Full Employer Flow: extract → normalize → analyze → compute → persist."""
 
-    # ── 1: Parse PDFs ────────────────────────────────────────────────────────
-    await manager.broadcast_to_session(role_id, {
-        "step": "pdf_processing", "status": "in_progress",
-        "message": "Parsing PDFs…"
-    })
+    # ── Phase 1A: Parse PDFs ─────────────────────────────────────────────────
+    await _pub(role_id, "jd_extraction", "start", "pdf_parsing",
+               "Parsing uploaded PDFs")
+
     jd_text   = pdf_service.extract_text(jd_bytes)
     team_text = pdf_service.extract_text(team_bytes) if team_bytes else ""
 
-    # ── 2: LLM Extraction (JD) ───────────────────────────────────────────────
-    await manager.broadcast_to_session(role_id, {
-        "step": "jd_extraction", "status": "in_progress",
-        "message": "Extracting skill requirements from JD…"
-    })
-    llm         = agent_creator.get_llm()
-    jd_resp     = await llm.ainvoke(JD_EXTRACTION_PROMPT.format(jd_text=jd_text))
-    skills_json = json.loads(_clean_json(jd_resp.content))
+    logger.info(f"[Orchestrator] JD TEXT (first 200):\n{jd_text[:200]}")
+    logger.info(f"[Orchestrator] TEAM TEXT (first 200):\n{team_text[:200]}")
+
+    await _pub(role_id, "jd_extraction", "log", "pdf_parsed",
+               "PDFs parsed successfully",
+               data={
+                   "jd_char_count":   len(jd_text),
+                   "team_char_count": len(team_text),
+                   "jd_preview":      jd_text[:200],
+                   "team_preview":    team_text[:200],
+               })
+
+    # ── Phase 1B: LLM Skill Extraction ──────────────────────────────────────
+    await _pub(role_id, "jd_extraction", "log", "llm_extraction_start",
+               "Sending JD to LLM for skill extraction",
+               model=ORCHESTRATOR_MODEL_TAG)
+
+    jd_reasoning, raw_llm_output = await orchestrator_llm_client.stream(
+        JD_EXTRACTION_PROMPT.format(jd_text=jd_text),
+        temperature=1,
+        max_tokens=16384,
+    )
+    logger.info(f"[Orchestrator] JD LLM raw content:\n{raw_llm_output}")
+    logger.info(f"[Orchestrator] JD LLM reasoning (first 200):\n{jd_reasoning[:200]}")
+
+    skills_json = json.loads(_clean_json(raw_llm_output))
     logger.info(f"LLM extracted {len(skills_json)} raw skills.")
 
-    # ── 3: Normalize via O*NET (LLM judge + Qdrant top-3) ────────────────────
-    await manager.broadcast_to_session(role_id, {
-        "step": "normalization", "status": "in_progress",
-        "message": f"Normalizing {len(skills_json)} skills against O*NET backbone…"
-    })
-    normalized_skills = await normalize_skills(skills_json)
-    matched = sum(1 for s in normalized_skills if s.get("canonical_id"))
+    await _pub(role_id, "jd_extraction", "result", "llm_extraction_done",
+               f"LLM extracted {len(skills_json)} raw skills",
+               model=ORCHESTRATOR_MODEL_TAG,
+               data={
+                   "raw_count": len(skills_json),
+                   "reasoning": jd_reasoning[:1000] if jd_reasoning else raw_llm_output[:500],
+                   "skills":    skills_json,
+               })
+
+    # ── Phase 2: Normalize via O*NET (LLM judge + Qdrant top-3) ─────────────
+    await _pub(role_id, "normalization", "start", "normalization_start",
+               f"Starting O*NET normalization for {len(skills_json)} skills")
+
+    # Pass role_id through so normalizer can publish per-skill events
+    normalized_skills = await normalize_skills(skills_json, role_id=role_id)
+
+    matched = sum(1 for s in normalized_skills if s.get("source") == "onet_match")
+    coined  = sum(1 for s in normalized_skills if s.get("source") == "llm_new")
+    failed  = sum(1 for s in normalized_skills if s.get("source") == "no_match")
+
+    await _pub(role_id, "normalization", "complete", "normalization_done",
+               f"{matched}/{len(normalized_skills)} skills matched to O*NET. {coined} new skill(s) coined.",
+               data={
+                   "matched":   matched,
+                   "coined":    coined,
+                   "no_match":  failed,
+               })
+
     logger.info(f"Normalization done. {matched}/{len(normalized_skills)} matched to O*NET.")
 
-    # ── 4: Team Context Analysis ─────────────────────────────────────────────
-    await manager.broadcast_to_session(role_id, {
-        "step": "team_analysis", "status": "in_progress",
-        "message": "Analyzing Team Context for skill relevance…"
-    })
+    # ── Phase 3: Team Context Analysis ──────────────────────────────────────
     canonical_names = [s.get("matched_name") or s["skill_name"] for s in normalized_skills]
     team_signals: List[Dict] = []
 
+    await _pub(role_id, "team_context", "start", "team_analysis_start",
+               "Sending normalized skills + Team Context to LLM",
+               model=ORCHESTRATOR_MODEL_TAG)
+
     if team_text.strip():
-        team_resp    = await llm.ainvoke(TEAM_CONTEXT_PROMPT.format(
-            skills_list=", ".join(canonical_names), team_text=team_text
-        ))
-        team_signals = json.loads(_clean_json(team_resp.content))
+        team_reasoning, raw_team_output = await orchestrator_llm_client.stream(
+            TEAM_CONTEXT_PROMPT.format(
+                skills_list=", ".join(canonical_names), team_text=team_text
+            ),
+            temperature=1,
+            max_tokens=16384,
+        )
+        logger.info(f"[Orchestrator] Team context content:\n{raw_team_output}")
+        logger.info(f"[Orchestrator] Team context reasoning (first 300):\n{team_reasoning[:300]}")
+
+        team_signals = json.loads(_clean_json(raw_team_output))
+
+        await _pub(role_id, "team_context", "result", "team_analysis_done",
+                   f"Team Context analysis complete. {len(team_signals)} skills found active in team.",
+                   model=ORCHESTRATOR_MODEL_TAG,
+                   data={
+                       "reasoning": team_reasoning[:1500] if team_reasoning else raw_team_output[:500],
+                       "signals":   team_signals,
+                   })
+    else:
+        await _pub(role_id, "team_context", "log", "team_analysis_skipped",
+                   "No Team Context document supplied. All skills defaulted to T4.")
 
     signal_map = {sig["skill_name"].lower(): sig["recency_category"] for sig in team_signals}
 
-    # ── 5: 2D Mastery Matrix ─────────────────────────────────────────────────
-    await manager.broadcast_to_session(role_id, {
-        "step": "mastery_computation", "status": "in_progress",
-        "message": "Computing target masteries via 2D matrix…"
-    })
+    # ── Phase 4: 2D Mastery Matrix ───────────────────────────────────────────
     sen = assumed_seniority.lower()
     if sen not in MASTERY_MATRIX:
         sen = "mid"
@@ -195,50 +265,57 @@ async def orchestrate_employer_flow(
         target   = MASTERY_MATRIX[sen][tier]
 
         final_skills.append({
-            "skill_name":   skill.get("matched_name") or skill["skill_name"],
-            "canonical_id": skill.get("canonical_id"),
-            "onet_level":   skill.get("onet_level"),
-            "category":     skill.get("category"),
-            "tier":         tier,
-            "team_recency": recency,
+            "skill_name":    skill.get("matched_name") or skill["skill_name"],
+            "canonical_id":  skill.get("canonical_id"),
+            "onet_level":    skill.get("onet_level"),
+            "category":      skill.get("category"),
+            "tier":          tier,
+            "team_recency":  recency,
             "target_mastery": target,
-            "reasoning":    skill.get("reasoning"),
+            "reasoning":     skill.get("reasoning"),
         })
 
-    # ── 6: Persist to SQLite ─────────────────────────────────────────────────
+    await _pub(role_id, "mastery", "result", "mastery_matrix_done",
+               f"Target mastery computed for all {len(final_skills)} skills",
+               data={
+                   "seniority": sen,
+                   "matrix_axes": {
+                       "y_axis": "Seniority Level (intern → lead)",
+                       "x_axis": "Team Tier (T1=critical → T4=secondary)"
+                   },
+                   "matrix_values": MASTERY_MATRIX[sen],
+                   "skills": final_skills,
+               })
+
+    # ── Phase 5: Persist to SQLite ───────────────────────────────────────────
     if db is not None:
-        await manager.broadcast_to_session(role_id, {
-            "step": "db_persistence", "status": "in_progress",
-            "message": "Saving skill metrics to database…"
-        })
+        await _pub(role_id, "db", "log", "db_persist_start",
+                   "Saving all skill metrics to SQLite")
         try:
             from sqlalchemy import update as sql_update
-            # Update role fields
             await db.execute(
                 sql_update(Role)
                 .where(Role.id == role_id)
                 .values(jd_text=jd_text, team_context_text=team_text, status="processing")
             )
             await db.commit()
-
             await persist_metrics(db, role_id, final_skills)
-
             await db.execute(
                 sql_update(Role).where(Role.id == role_id).values(status="completed")
             )
             await db.commit()
+
+            await _pub(role_id, "db", "complete", "db_persist_done",
+                       f"Employer Flow complete. {len(final_skills)} skills saved.",
+                       data={
+                           "total_skills": len(final_skills),
+                           "onet_matched": matched,
+                           "llm_coined":   coined,
+                       })
         except Exception as e:
             logger.error(f"DB persistence failed for role {role_id}: {e}")
             await db.rollback()
-            await manager.broadcast_to_session(role_id, {
-                "step": "db_persistence", "status": "failed",
-                "message": f"DB save failed: {e}"
-            })
+            await _pub(role_id, "db", "error", "db_persist_failed",
+                       f"DB persistence failed: {e}")
 
-    # ── Complete ──────────────────────────────────────────────────────────────
-    await manager.broadcast_to_session(role_id, {
-        "step": "completed", "status": "completed",
-        "message": "Employer Flow complete.",
-        "data": {"skills": final_skills}
-    })
     return final_skills
