@@ -72,9 +72,9 @@ async def main():
     completion = await client.chat.completions.create(
         model="stepfun-ai/step-3.5-flash",
         messages=[{"role": "user", "content": prompt}],
-        temperature=1,
+        temperature=0.7,
         top_p=0.9,
-        max_tokens=16384,
+        max_tokens=20000,
         stream=True,
     )
 

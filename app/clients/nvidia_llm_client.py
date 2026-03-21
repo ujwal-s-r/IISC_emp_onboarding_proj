@@ -4,13 +4,18 @@ Nvidia LLM Client
 A unified client using the official Nvidia API endpoint:
 https://integrate.api.nvidia.com/v1
 
-Supports three purpose-built models:
-  - JUDGE_MODEL        = openai/gpt-oss-20b          (skill normalization judge/coining)
+Supports four purpose-built model roles:
+  - JUDGE_MODEL        = openai/gpt-oss-20b          (skill normalisation judge/coining — no thinking)
   - ORCHESTRATOR_MODEL = stepfun-ai/step-3.5-flash   (JD extraction + team context)
-  - RESUME_MODEL       = z-ai/glm4.7                 (resume extraction — enable_thinking)
+  - RESUME_MODEL       = stepfun-ai/step-3.5-flash   (resume extraction — no thinking)
+  - MASTERY_MODEL      = openai/gpt-oss-20b           (mastery scoring — thinking ON)
+
+Thinking mode is model-aware:
+  - gpt-oss-20b: extra_body chat_template_kwargs {"thinking": True}
+    reasoning_content = CoT trace; content = final JSON answer (separate budgets)
+  - GLM4.7 (legacy): chat_template_kwargs {enable_thinking, clear_thinking}
 
 All models stream and return (reasoning, content) tuples.
-Reasoning text is logged in dim grey; content in normal colour.
 """
 import sys
 import os
@@ -27,7 +32,8 @@ _RESET         = "\033[0m"  if _USE_COLOR else ""
 
 JUDGE_MODEL        = "openai/gpt-oss-20b"
 ORCHESTRATOR_MODEL = "stepfun-ai/step-3.5-flash"
-RESUME_MODEL       = "z-ai/glm4.7"
+RESUME_MODEL       = "stepfun-ai/step-3.5-flash"
+MASTERY_MODEL      = "openai/gpt-oss-20b"
 
 
 class NvidiaLLMClient:
@@ -50,7 +56,7 @@ class NvidiaLLMClient:
         self,
         prompt: str,
         temperature: float = 0.0,
-        max_tokens: int = 4096,
+        max_tokens: int = 20000,
         role_id: Optional[str] = None,
         phase: Optional[str] = None,
         step_name: Optional[str] = "llm_streaming"
@@ -70,14 +76,23 @@ class NvidiaLLMClient:
                 max_tokens=max_tokens,
                 stream=True,
             )
-            # GLM4.7 / enable_thinking models need the extra chat_template_kwargs
+            # Model-aware thinking params:
+            #   gpt-oss-20b  → chat_template_kwargs {"thinking": True}
+            #     reasoning_content = CoT trace; content = final answer (separate budgets)
+            #   GLM4.7 (legacy) → chat_template_kwargs {enable_thinking, clear_thinking}
             if self.enable_thinking:
-                create_kwargs["extra_body"] = {
-                    "chat_template_kwargs": {
-                        "enable_thinking": True,
-                        "clear_thinking":  False,
+                if "glm" in self.model.lower():
+                    create_kwargs["extra_body"] = {
+                        "chat_template_kwargs": {
+                            "enable_thinking": True,
+                            "clear_thinking":  False,
+                        }
                     }
-                }
+                else:
+                    # gpt-oss-20b and compatible models
+                    create_kwargs["extra_body"] = {
+                        "chat_template_kwargs": {"thinking": True}
+                    }
 
             completion = await self.client.chat.completions.create(**create_kwargs)
 
@@ -148,12 +163,16 @@ class NvidiaLLMClient:
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 
-# Used by skill_normalizer for O*NET judge + coining (logic-focused, temperature=0)
+# Used by skill_normalizer for O*NET judge + coining (no thinking, logic-focused)
 nvidia_llm_client = NvidiaLLMClient(model=JUDGE_MODEL)
 
-# Used by employer orchestrator for JD extraction + team context
+# Used by employer/employee orchestrators for JD extraction + team context
 orchestrator_llm_client = NvidiaLLMClient(model=ORCHESTRATOR_MODEL)
 
 # Used by employee orchestrator for resume extraction
-# enable_thinking=True passes chat_template_kwargs to the GLM4.7 API
-resume_llm_client = NvidiaLLMClient(model=RESUME_MODEL, enable_thinking=True)
+# stepfun-ai/step-3.5-flash — no thinking, outputs JSON directly in content chunks
+resume_llm_client = NvidiaLLMClient(model=RESUME_MODEL, enable_thinking=False)
+
+# Used by employee orchestrator for mastery scoring
+# gpt-oss-20b with thinking ON — reasoning_content = CoT, content = final JSON
+mastery_llm_client = NvidiaLLMClient(model=MASTERY_MODEL, enable_thinking=True)
