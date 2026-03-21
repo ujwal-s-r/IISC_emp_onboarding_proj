@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
+import { useMemo } from "react";
 import {
   PHASE_LABEL,
   PHASE_ORDER,
@@ -26,10 +20,7 @@ interface JdSkill {
 
 function LogRow({ ev }: { ev: NormalizedEmployerEvent }) {
   return (
-    <div
-      data-orch-step={ev.id}
-      className="rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm"
-    >
+    <div className="rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-center gap-2 text-white/80">
         <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-white/60">
           {ev.type}
@@ -67,28 +58,6 @@ function PayloadPreview({ data }: { data: Record<string, unknown> }) {
   return null;
 }
 
-function AutoScrollPre({
-  text,
-  className,
-}: {
-  text: string;
-  className?: string;
-}) {
-  const ref = useRef<HTMLPreElement>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [text]);
-
-  return (
-    <pre ref={ref} className={className}>
-      {text}
-    </pre>
-  );
-}
-
 function StreamBlock({
   title,
   text,
@@ -106,12 +75,13 @@ function StreamBlock({
       defaultOpen
       className="mt-2"
     >
-      <AutoScrollPre
-        text={text}
-        className={`max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap rounded-lg bg-black/40 p-3 text-xs leading-relaxed text-white/75 [overflow-wrap:anywhere] ${
+      <pre
+        className={`max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/40 p-3 text-xs leading-relaxed text-white/75 ${
           mono ? "font-mono" : ""
         }`}
-      />
+      >
+        {text}
+      </pre>
     </Collapsible>
   );
 }
@@ -187,27 +157,16 @@ function CandidatesTable({
   );
 }
 
-function streamSignature(streams: Record<string, StreamBuffers>): string {
-  let s = "";
-  for (const k of Object.keys(streams)) {
-    const v = streams[k];
-    s += `${k}:${v.reasoning.length}:${v.content.length};`;
-  }
-  return s;
-}
-
 export function EventTree({
   events,
   streams,
   streamKey,
   wsOpen,
-  scrollParentRef,
 }: {
   events: NormalizedEmployerEvent[];
   streams: Record<string, StreamBuffers>;
   streamKey: (phase: string, step: string) => string;
   wsOpen: boolean;
-  scrollParentRef?: RefObject<HTMLElement | null>;
 }) {
   const byPhase = useMemo(() => {
     const m: Record<string, NormalizedEmployerEvent[]> = {};
@@ -219,146 +178,11 @@ export function EventTree({
     return m;
   }, [events]);
 
-  const livePhase = useMemo((): Phase | null => {
-    if (!wsOpen && events.length === 0) return null;
-
-    const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-    const skTeam = streamKey("team_context", "team_analysis_streaming");
-
-    const jdEnded = events.some(
-      (e) =>
-        e.phase === "jd_extraction" &&
-        e.type === "stream_end" &&
-        e.step === "llm_extraction_streaming"
-    );
-    const teamEnded = events.some(
-      (e) =>
-        e.phase === "team_context" &&
-        e.type === "stream_end" &&
-        e.step === "team_analysis_streaming"
-    );
-
-    const jdBuf = streams[skJd];
-    const teamBuf = streams[skTeam];
-    const jdStreaming =
-      !jdEnded &&
-      Boolean(
-        (jdBuf?.reasoning && jdBuf.reasoning.length > 0) ||
-          (jdBuf?.content && jdBuf.content.length > 0)
-      );
-    const teamStreaming =
-      !teamEnded &&
-      Boolean(
-        (teamBuf?.reasoning && teamBuf.reasoning.length > 0) ||
-          (teamBuf?.content && teamBuf.content.length > 0)
-      );
-
-    if (wsOpen && events.length === 0) return "jd_extraction";
-    if (jdStreaming) return "jd_extraction";
-    if (teamStreaming) return "team_context";
-
-    const last = events[events.length - 1];
-    if (last && isPhase(last.phase)) return last.phase;
-
-    if (wsOpen) return "jd_extraction";
-    return null;
-  }, [events, streams, streamKey, wsOpen]);
-
-  const [phaseOpen, setPhaseOpen] = useState<Partial<Record<Phase, boolean>>>(
-    {}
-  );
-
-  useLayoutEffect(() => {
-    if (!livePhase) return;
-    setPhaseOpen((prev) => {
-      const next = { ...prev };
-      const idx = PHASE_ORDER.indexOf(livePhase);
-      for (let i = 0; i < idx; i++) {
-        next[PHASE_ORDER[i]] = false;
-      }
-      next[livePhase] = true;
-      return next;
-    });
-  }, [livePhase]);
-
-  const streamSig = useMemo(() => streamSignature(streams), [streams]);
-
-  const activeStepScrollTarget = useMemo((): string | null => {
-    const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-    const skTeam = streamKey("team_context", "team_analysis_streaming");
-
-    const jdEnded = events.some(
-      (e) =>
-        e.phase === "jd_extraction" &&
-        e.type === "stream_end" &&
-        e.step === "llm_extraction_streaming"
-    );
-    const teamEnded = events.some(
-      (e) =>
-        e.phase === "team_context" &&
-        e.type === "stream_end" &&
-        e.step === "team_analysis_streaming"
-    );
-
-    const jdBuf = streams[skJd];
-    const teamBuf = streams[skTeam];
-    const jdStreaming =
-      !jdEnded &&
-      Boolean(
-        (jdBuf?.reasoning && jdBuf.reasoning.length > 0) ||
-          (jdBuf?.content && jdBuf.content.length > 0)
-      );
-    const teamStreaming =
-      !teamEnded &&
-      Boolean(
-        (teamBuf?.reasoning && teamBuf.reasoning.length > 0) ||
-          (teamBuf?.content && teamBuf.content.length > 0)
-      );
-
-    if (jdStreaming) return "stream-jd";
-    if (teamStreaming) return "stream-team";
-
-    const last = events[events.length - 1];
-    if (!last) return null;
-
-    if (
-      last.phase === "jd_extraction" &&
-      last.type === "result" &&
-      last.step === "llm_extraction_done"
-    ) {
-      return "jd-result";
-    }
-    if (
-      last.phase === "team_context" &&
-      last.type === "result" &&
-      last.step === "team_analysis_done"
-    ) {
-      return "team-result";
-    }
-    if (
-      last.phase === "mastery" &&
-      last.type === "result" &&
-      last.step === "mastery_matrix_done"
-    ) {
-      return "mastery-result";
-    }
-
-    return last.id;
-  }, [events, streams, streamKey]);
-
-  useLayoutEffect(() => {
-    const root = scrollParentRef?.current;
-    if (!root || !activeStepScrollTarget) return;
-
-    requestAnimationFrame(() => {
-      const safe =
-        typeof CSS !== "undefined" && typeof CSS.escape === "function"
-          ? CSS.escape(activeStepScrollTarget)
-          : activeStepScrollTarget.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      const el = root.querySelector(`[data-orch-step="${safe}"]`);
-      el?.scrollIntoView({ block: "nearest", behavior: "auto" });
-    });
-  }, [activeStepScrollTarget, streamSig, scrollParentRef, livePhase]);
+  const activePhase = events.length
+    ? (isPhase(events[events.length - 1].phase)
+        ? events[events.length - 1].phase
+        : null)
+    : null;
 
   const jdResult = useMemo(() => {
     const list = byPhase.jd_extraction ?? [];
@@ -408,24 +232,20 @@ export function EventTree({
     <div className="space-y-4">
       {PHASE_ORDER.map((phase) => {
         const phaseEvents = byPhase[phase] ?? [];
-        const isActive = livePhase === phase && (wsOpen || phaseEvents.length > 0);
+        const isActive = activePhase === phase && wsOpen;
         const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
         const skTeam = streamKey("team_context", "team_analysis_streaming");
 
         return (
           <Collapsible
             key={phase}
-            open={phaseOpen[phase] ?? false}
-            onOpenChange={(o) =>
-              setPhaseOpen((p) => ({ ...p, [phase]: o }))
-            }
-            defaultOpen={false}
             title={PHASE_LABEL[phase]}
             subtitle={
               phaseEvents.length
                 ? `${phaseEvents.length} events`
                 : "Waiting…"
             }
+            defaultOpen={phase === "jd_extraction" || isActive}
             badge={
               isActive ? (
                 <span className="animate-pulse-slow rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
@@ -447,10 +267,7 @@ export function EventTree({
                   return <LogRow key={e.id} ev={e} />;
                 })}
                 {(streams[skJd]?.reasoning || streams[skJd]?.content) && (
-                  <div
-                    data-orch-step="stream-jd"
-                    className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3"
-                  >
+                  <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
                     <p className="text-xs font-medium text-violet-200/90">
                       Live LLM stream
                     </p>
@@ -465,10 +282,7 @@ export function EventTree({
                   </div>
                 )}
                 {jdResult ? (
-                  <div
-                    data-orch-step="jd-result"
-                    className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3"
-                  >
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
                     <p className="text-sm font-medium text-emerald-100/90">
                       Extracted skills ({jdSkills.length})
                     </p>
@@ -556,10 +370,7 @@ export function EventTree({
                   return <LogRow key={e.id} ev={e} />;
                 })}
                 {(streams[skTeam]?.reasoning || streams[skTeam]?.content) && (
-                  <div
-                    data-orch-step="stream-team"
-                    className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3"
-                  >
+                  <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3">
                     <p className="text-xs font-medium text-sky-200/90">
                       Live team analysis stream
                     </p>
@@ -574,10 +385,7 @@ export function EventTree({
                   </div>
                 )}
                 {teamResult ? (
-                  <div
-                    data-orch-step="team-result"
-                    className="rounded-xl border border-sky-500/25 bg-sky-500/5 p-3"
-                  >
+                  <div className="rounded-xl border border-sky-500/25 bg-sky-500/5 p-3">
                     {typeof teamResult.data.reasoning === "string" &&
                     teamResult.data.reasoning ? (
                       <Collapsible
@@ -622,10 +430,7 @@ export function EventTree({
                 ))}
                 {masteryResult?.data?.skills &&
                 Array.isArray(masteryResult.data.skills) ? (
-                  <div
-                    data-orch-step="mastery-result"
-                    className="overflow-x-auto rounded-xl border border-white/10"
-                  >
+                  <div className="overflow-x-auto rounded-xl border border-white/10">
                     <table className="w-full min-w-[520px] text-left text-xs">
                       <thead className="bg-white/5 text-white/50">
                         <tr>

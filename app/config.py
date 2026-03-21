@@ -20,9 +20,13 @@ class Settings(BaseSettings):
     # Nvidia API
     NVIDIA_API_KEY: str = "nvapi-..."
     
-    # Qdrant Cloud
+    # Qdrant Cloud — Instance 1 (O*NET skills / existing)
     QDRANT_URL: str = "https://..."
     QDRANT_API_KEY: str = "..."
+
+    # Qdrant Cloud — Instance 2 (Courses / learning paths)
+    QDRANT_COURSES_URL: str = "https://.."
+    QDRANT_COURSES_API_KEY: str = "..."
 
     HF_TOKEN: str = ""
 

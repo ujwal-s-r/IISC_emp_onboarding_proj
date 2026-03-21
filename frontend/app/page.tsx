@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo } from "react";
 import { EmployerFormPanel } from "@/components/home/EmployerFormPanel";
 import { ResumePanel } from "@/components/home/ResumePanel";
 import { EventTree } from "@/components/home/EventTree";
@@ -45,35 +44,6 @@ export default function HomePage() {
   const busy = wsStatus === "connecting" || wsStatus === "open";
   const wsOpen = wsStatus === "open";
   const router = useRouter();
-
-  const orchestrationScrollRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
-
-  useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-    const fromUrl =
-      typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("role")
-        : null;
-    if (fromUrl) {
-      void loadRoleById(fromUrl);
-    }
-  }, [loadRoleById]);
-
-  useEffect(() => {
-    const currentRole =
-      typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("role")
-        : null;
-    if (roleId && roleId !== currentRole) {
-      router.replace(`/?role=${encodeURIComponent(roleId)}`);
-      return;
-    }
-    if (!roleId && currentRole) {
-      router.replace("/");
-    }
-  }, [roleId, router]);
 
   const { leftPane, rightPane } = useMemo(() => {
     const base =
@@ -243,16 +213,12 @@ export default function HomePage() {
                   Redis → <code className="text-white/50">/ws/employer/setup/{"{role_id}"}</code>
                 </p>
               </div>
-              <div
-                ref={orchestrationScrollRef}
-                className="min-h-[200px] flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] md:min-h-[280px]"
-              >
+              <div className="min-h-[200px] flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] md:min-h-[280px]">
                 <EventTree
                   events={events}
                   streams={streams}
                   streamKey={streamKey}
                   wsOpen={wsOpen}
-                  scrollParentRef={orchestrationScrollRef}
                 />
               </div>
             </div>
