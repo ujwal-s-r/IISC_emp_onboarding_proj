@@ -40,6 +40,18 @@ TOP_K_CANDIDATES = 30          # Candidates per gap fed into NSGA-II
 NSGA_GENERATIONS = 40          # Number of NSGA-II iterations
 POPULATION_SIZE  = 30          # Equals TOP_K (we optimise over the candidate set)
 
+# ── Module-level Qdrant singleton ──────────────────────────────────────────
+# check_compatibility=False suppresses the 'Failed to obtain server version'
+# UserWarning that fires when the client cannot reach the server on init.
+# Connection errors (including bad URLs / IDNA failures) are caught per-skill
+# in generate_paths() so a misconfigured URL degrades gracefully instead of
+# crashing the entire orchestrator.
+_qdrant_courses = QdrantClient(
+    url=settings.QDRANT_COURSES_URL,
+    api_key=settings.QDRANT_COURSES_API_KEY,
+    check_compatibility=False,
+)
+
 
 # ── Level mapping: derive required level from target_mastery ─────────────────
 def _mastery_to_level(target_mastery: float) -> int:
@@ -262,7 +274,6 @@ async def generate_paths(
         data={"total_stages": len(stages), "algorithm": "NSGA-II 4-objective Pareto"},
     )
 
-    qdrant = QdrantClient(url=settings.QDRANT_COURSES_URL, api_key=settings.QDRANT_COURSES_API_KEY)
     gap_options: Dict[str, Dict] = {}
 
     for stage in stages:
@@ -286,7 +297,18 @@ async def generate_paths(
                 continue
 
             # Search Qdrant
-            candidates = _search_courses(qdrant, query_vec)
+            try:
+                candidates = _search_courses(_qdrant_courses, query_vec)
+            except Exception as e:
+                logger.warning(f"[PathGenerator] Qdrant search failed for '{skill_name}': {e}")
+                await redis_client.publish_event(
+                    role_id=role_id, phase="path", event_type="log",
+                    step="nsga_gap_done",
+                    message=f"Course search failed for '{skill_name}' — skipping",
+                    data={"skill": skill_name, "error": str(e)},
+                )
+                gap_options[skill_name] = {"sprint": None, "balanced": None, "quality": None}
+                continue
 
             if not candidates:
                 logger.warning(f"[PathGenerator] No candidates found for '{skill_name}'")
