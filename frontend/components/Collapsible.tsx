@@ -1,11 +1,13 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 export function Collapsible({
   title,
   subtitle,
   defaultOpen = true,
+  open: openProp,
+  onOpenChange,
   badge,
   children,
   className = "",
@@ -13,12 +15,28 @@ export function Collapsible({
   title: ReactNode;
   subtitle?: ReactNode;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   badge?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const id = useId();
+
+  useEffect(() => {
+    if (openProp === undefined) {
+      setInternalOpen(defaultOpen);
+    }
+  }, [defaultOpen, openProp]);
+
+  const open = openProp !== undefined ? openProp : internalOpen;
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) {
+      setInternalOpen(next);
+    }
+    onOpenChange?.(next);
+  };
 
   return (
     <div
@@ -28,7 +46,7 @@ export function Collapsible({
         type="button"
         aria-expanded={open}
         aria-controls={id}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
         className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition hover:bg-white/[0.04]"
       >
         <div className="min-w-0 flex-1">
