@@ -284,3 +284,52 @@ Fires containing the parsed signals for tiering.
   }
 }
 ```
+
+---
+
+## Phase 6: `resume_extraction` (Employee Flow)
+
+When an employee is processed against a role, the system streams events using the very same `channel:{role_id}` channel so the UI can follow the employee flow without reconnecting.
+
+### 19. Resume Extraction Start
+```json
+{
+  "phase": "resume_extraction", "type": "start",
+  "step": "pdf_parsing",
+  "message": "Parsing uploaded Resume PDF for employee",
+  "data": {}
+}
+```
+
+### 20. Live Streaming Resume Skill Extraction (Fires multiple times)
+```json
+{
+  "phase": "resume_extraction", "type": "stream_chunk",
+  "step": "llm_extraction_streaming",
+  "message": "",
+  "model": "stepfun-ai/step-3.5-flash",
+  "data": {
+    "chunk_type": "reasoning", // or "content"
+    "text": "The candidate's resume states they used PySpark..."
+  }
+}
+```
+
+### 21. Final Resume LLM Result
+```json
+{
+  "phase": "resume_extraction", "type": "result",
+  "step": "llm_extraction_done",
+  "message": "LLM extracted 6 raw skills from Resume",
+  "model": "stepfun-ai/step-3.5-flash",
+  "data": {
+    "raw_count": 6,
+    "reasoning": "The resume lists experience with Data Engineering specifically mentioning...",
+    "skills": [
+      {"skill_name": "PySpark", "context_depth": "Optimized batch jobs processing 10TB daily"}
+    ]
+  }
+}
+```
+
+**Note:** After Phase 6, the system runs Phase 7 (`normalization`), which uses the exact same `normalization` event structure as Phase 2, mapped onto the employee's raw skills.

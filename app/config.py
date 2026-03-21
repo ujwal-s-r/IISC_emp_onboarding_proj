@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "https://..."
     QDRANT_API_KEY: str = "..."
 
+    HF_TOKEN: str = ""
+
     # Neo4j Aura
     NEO4J_URI: str = "neo4j+s://..."
     NEO4J_USER: str = "neo4j"

@@ -3,6 +3,9 @@ from typing import List
 from app.utils.logger import logger
 
 
+import os
+from app.config import settings
+
 class EmbeddingClient:
     """
     Local embedding client using intfloat/multilingual-e5-small.
@@ -14,6 +17,9 @@ class EmbeddingClient:
     VECTOR_SIZE = 384
 
     def __init__(self):
+        if settings.HF_TOKEN:
+            os.environ["HF_TOKEN"] = settings.HF_TOKEN
+
         logger.info(f"Loading embedding model: {self.MODEL_NAME}")
         self.model = SentenceTransformer(self.MODEL_NAME)
         logger.info("Embedding model loaded successfully.")

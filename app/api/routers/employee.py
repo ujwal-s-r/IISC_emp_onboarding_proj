@@ -10,6 +10,8 @@ import uuid
 router = APIRouter(prefix="/employee", tags=["Employee"])
 
 
+from app.services.employee_flow.orchestrator import orchestrate_employee_flow
+
 async def _run_employee_orchestrator(
     employee_id: str,
     role_id: str,
@@ -20,9 +22,13 @@ async def _run_employee_orchestrator(
     """
     async with AsyncSessionLocal() as db:
         try:
-            # Here we will later call `orchestrate_employee_flow`
             logger.info(f"Background task started for employee {employee_id}")
-            pass
+            await orchestrate_employee_flow(
+                employee_id=employee_id,
+                role_id=role_id,
+                resume_bytes=resume_bytes,
+                db=db
+            )
         except Exception as e:
             logger.error(f"Orchestrator failed for employee {employee_id}: {e}")
             from sqlalchemy import update as sql_update
