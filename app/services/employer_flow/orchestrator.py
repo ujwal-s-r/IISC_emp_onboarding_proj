@@ -85,10 +85,31 @@ NORMALIZATION_THRESHOLD = 0.70
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _clean_json(raw: str) -> str:
+    """
+    Extract a JSON array from an LLM response.
+    Handles: clean JSON, markdown-fenced JSON, and JSON embedded in a
+    reasoning trace (where the array may appear after a long CoT block).
+    """
+    if not raw or raw.strip().upper() == "NONE":
+        return "[]"
+
     cleaned = raw.strip()
     cleaned = re.sub(r"^```json\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except Exception:
+        pass
+
+    # Find the LAST JSON array in the text (handles CoT prefix before answer)
+    matches = list(re.finditer(r"\[\s*\{.*?\}\s*\]", cleaned, re.DOTALL))
+    if matches:
+        return matches[-1].group(0)
+
+    return "[]"
 
 
 def calculate_tier(recency: str) -> str:
@@ -121,7 +142,7 @@ async def persist_metrics(db: AsyncSession, role_id: str, final_skills: List[Dic
     for s in final_skills:
         tier    = s.get("tier", "T4")
         recency = s.get("team_recency", "none")
-        name    = s.get("matched_name") or s["skill_name"]
+        name    = s.get("matched_name") or s.get("skill_name") or s.get("raw_name", "unknown")
 
         db.add(TargetSkill(
             role_id            = role_id,
@@ -180,7 +201,7 @@ async def orchestrate_employer_flow(
                model=ORCHESTRATOR_MODEL_TAG)
 
     jd_reasoning, raw_llm_output = await orchestrator_llm_client.stream(
-        JD_EXTRACTION_PROMPT.format(jd_text=jd_text),
+        JD_EXTRACTION_PROMPT.replace("{jd_text}", jd_text),
         temperature=1,
         max_tokens=16384,
         role_id=role_id,
@@ -190,7 +211,11 @@ async def orchestrate_employer_flow(
     logger.info(f"[Orchestrator] JD LLM raw content:\n{raw_llm_output}")
     logger.info(f"[Orchestrator] JD LLM reasoning (first 200):\n{jd_reasoning[:200]}")
 
-    skills_json = json.loads(_clean_json(raw_llm_output))
+    try:
+        skills_json = json.loads(_clean_json(raw_llm_output))
+    except Exception as e:
+        logger.error(f"Failed to parse JD extraction JSON: {e}\nRaw: {raw_llm_output[:300]}")
+        skills_json = []
     logger.info(f"LLM extracted {len(skills_json)} raw skills.")
 
     await _pub(role_id, "jd_extraction", "result", "llm_extraction_done",
@@ -224,7 +249,7 @@ async def orchestrate_employer_flow(
     logger.info(f"Normalization done. {matched}/{len(normalized_skills)} matched to O*NET.")
 
     # ── Phase 3: Team Context Analysis ──────────────────────────────────────
-    canonical_names = [s.get("matched_name") or s["skill_name"] for s in normalized_skills]
+    canonical_names = [s.get("matched_name") or s.get("skill_name") or s.get("raw_name", "") for s in normalized_skills]
     team_signals: List[Dict] = []
 
     await _pub(role_id, "team_context", "start", "team_analysis_start",
@@ -233,9 +258,9 @@ async def orchestrate_employer_flow(
 
     if team_text.strip():
         team_reasoning, raw_team_output = await orchestrator_llm_client.stream(
-            TEAM_CONTEXT_PROMPT.format(
-                skills_list=", ".join(canonical_names), team_text=team_text
-            ),
+            TEAM_CONTEXT_PROMPT
+                .replace("{skills_list}", ", ".join(canonical_names))
+                .replace("{team_text}", team_text),
             temperature=1,
             max_tokens=16384,
             role_id=role_id,
@@ -245,7 +270,11 @@ async def orchestrate_employer_flow(
         logger.info(f"[Orchestrator] Team context content:\n{raw_team_output}")
         logger.info(f"[Orchestrator] Team context reasoning (first 300):\n{team_reasoning[:300]}")
 
-        team_signals = json.loads(_clean_json(raw_team_output))
+        try:
+            team_signals = json.loads(_clean_json(raw_team_output))
+        except Exception as e:
+            logger.error(f"Failed to parse team context JSON: {e}\nRaw: {raw_team_output[:300]}")
+            team_signals = []
 
         await _pub(role_id, "team_context", "result", "team_analysis_done",
                    f"Team Context analysis complete. {len(team_signals)} skills found active in team.",
@@ -258,7 +287,7 @@ async def orchestrate_employer_flow(
         await _pub(role_id, "team_context", "log", "team_analysis_skipped",
                    "No Team Context document supplied. All skills defaulted to T4.")
 
-    signal_map = {sig["skill_name"].lower(): sig["recency_category"] for sig in team_signals}
+    signal_map = {sig.get("skill_name", "").lower(): sig.get("recency_category", "general") for sig in team_signals if sig.get("skill_name")}
 
     # ── Phase 4: 2D Mastery Matrix ───────────────────────────────────────────
     sen = assumed_seniority.lower()
@@ -267,13 +296,13 @@ async def orchestrate_employer_flow(
 
     final_skills: List[Dict[str, Any]] = []
     for skill in normalized_skills:
-        name_key = (skill.get("matched_name") or skill["skill_name"]).lower()
+        name_key = (skill.get("matched_name") or skill.get("skill_name") or skill.get("raw_name", "")).lower()
         recency  = signal_map.get(name_key, "none")
         tier     = calculate_tier(recency)
         target   = MASTERY_MATRIX[sen][tier]
 
         final_skills.append({
-            "skill_name":    skill.get("matched_name") or skill["skill_name"],
+            "skill_name":    skill.get("matched_name") or skill.get("skill_name") or skill.get("raw_name", "unknown"),
             "canonical_id":  skill.get("canonical_id"),
             "onet_level":    skill.get("onet_level"),
             "category":      skill.get("category"),

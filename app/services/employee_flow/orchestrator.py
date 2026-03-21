@@ -12,6 +12,7 @@ Phases:
 """
 import json
 import re
+import asyncio
 from typing import List, Dict, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update as sql_update
@@ -19,16 +20,19 @@ from sqlalchemy import update as sql_update
 from app.services.pdf_service import pdf_service
 from app.services.skill_normalizer import normalize_skills
 from app.clients.redis_client import redis_client
-from app.clients.nvidia_llm_client import orchestrator_llm_client, ORCHESTRATOR_MODEL
+from app.clients.nvidia_llm_client import resume_llm_client, RESUME_MODEL
 from app.models.domain import Employee
 from app.utils.logger import logger
 
 RESUME_EXTRACTION_PROMPT = """
 You are an expert Technical Skills Extractor. Your task is to extract skill evidence from the following Resume.
 
-For each technical skill the candidate possesses, extract:
-1. 'skill_name': The raw skill name (e.g., 'PySpark').
-2. 'context_depth': A short phrase detailing exactly HOW they used the skill based on the resume. If no context is provided, return 'Surface mention'.
+Focus on the 20-25 most mainstream, industry-recognised technical skills only.
+Ignore soft skills, generic concepts, and minor or one-off mentions.
+
+For each skill, extract:
+1. 'skill_name': The canonical skill name (e.g., 'PySpark', 'FastAPI', 'Docker').
+2. 'context_depth': A short phrase detailing exactly HOW they used the skill. If no context is provided, return 'Surface mention'.
 
 Return strictly a JSON array inside a ```json block. Do not include any conversational text.
 Example:
@@ -44,10 +48,33 @@ Resume Text:
 
 
 def _clean_json(raw: str) -> str:
+    """
+    Extract a JSON array from an LLM response.
+    Handles: clean JSON, markdown-fenced JSON, and JSON embedded in a
+    reasoning trace (where the array may appear after a long CoT block).
+    """
+    if not raw or raw.strip().upper() == "NONE":
+        return "[]"
+
+    # 1. Strip outermost markdown fences
     cleaned = raw.strip()
     cleaned = re.sub(r"^```json\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+
+    # 2. Try to parse directly
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except Exception:
+        pass
+
+    # 3. Find the LAST JSON array in the text (handles CoT prefix before answer)
+    matches = list(re.finditer(r"\[\s*\{.*?\}\s*\]", cleaned, re.DOTALL))
+    if matches:
+        return matches[-1].group(0)
+
+    return "[]"
 
 
 async def _pub(role_id: str, phase: str, event_type: str, step: str, message: str, data: dict = None, model: str = None):
@@ -62,6 +89,16 @@ async def _pub(role_id: str, phase: str, event_type: str, step: str, message: st
     )
 
 
+async def _db_save(db: AsyncSession, **values):
+    """Fire-and-forget helper: run a DB update without blocking the main pipeline."""
+    try:
+        employee_id = values.pop("_employee_id")
+        await db.execute(sql_update(Employee).where(Employee.id == employee_id).values(**values))
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"[Employee Orchestrator] Background DB save failed: {e}")
+
+
 async def orchestrate_employee_flow(
     employee_id: str,
     role_id: str,
@@ -69,7 +106,7 @@ async def orchestrate_employee_flow(
     db: AsyncSession,
 ):
     """Stage 2: Extracts resume skills and normalizes them."""
-    
+
     # ── Phase 6A: Parse Resume PDF ───────────────────────────────────────────
     await _pub(role_id, "resume_extraction", "start", "pdf_parsing",
                "Parsing uploaded Resume PDF for employee")
@@ -85,24 +122,25 @@ async def orchestrate_employee_flow(
                    "resume_preview": resume_text[:200],
                })
 
-    # Save raw resume text quickly to DB
-    await db.execute(sql_update(Employee).where(Employee.id == employee_id).values(resume_text=resume_text, status="processing"))
-    await db.commit()
+    # ── Fire DB save in background — do NOT await before starting LLM ────────
+    # Status update runs concurrently; LLM stream starts immediately.
+    asyncio.ensure_future(_db_save(db, _employee_id=employee_id,
+                                   resume_text=resume_text, status="processing"))
 
     # ── Phase 6B: LLM Skill Extraction ──────────────────────────────────────
     await _pub(role_id, "resume_extraction", "log", "llm_extraction_start",
                "Sending Resume to LLM for skill and context extraction",
-               model=ORCHESTRATOR_MODEL)
+               model=RESUME_MODEL)
 
-    resume_reasoning, raw_llm_output = await orchestrator_llm_client.stream(
-        RESUME_EXTRACTION_PROMPT.format(resume_text=resume_text),
+    resume_reasoning, raw_llm_output = await resume_llm_client.stream(
+        RESUME_EXTRACTION_PROMPT.replace("{resume_text}", resume_text),
         temperature=0.3,
-        max_tokens=8192,
+        max_tokens=16384,
         role_id=role_id,
         phase="resume_extraction",
         step_name="llm_extraction_streaming"
     )
-    
+
     logger.info(f"[Employee Orchestrator] Resume LLM raw content:\n{raw_llm_output}")
 
     try:
@@ -113,19 +151,17 @@ async def orchestrate_employee_flow(
 
     await _pub(role_id, "resume_extraction", "result", "llm_extraction_done",
                f"LLM extracted {len(skills_json)} raw skills from Resume",
-               model=ORCHESTRATOR_MODEL,
+               model=RESUME_MODEL,
                data={
                    "raw_count": len(skills_json),
                    "reasoning": resume_reasoning[:1000] if resume_reasoning else raw_llm_output[:500],
                    "skills": skills_json,
                })
 
-    # Save career timeline (parsed JSON) to DB
-    await db.execute(sql_update(Employee).where(Employee.id == employee_id).values(career_timeline=skills_json))
-    await db.commit()
+    # ── Fire career_timeline DB save in background — normalization starts now ─
+    asyncio.ensure_future(_db_save(db, _employee_id=employee_id, career_timeline=skills_json))
 
     # ── Phase 7: Normalize via O*NET ─────────────────────────────────────────
-    # We reuse the exact same normalization pipeline and redis channel (role_id)
     await _pub(role_id, "normalization", "start", "normalization_start",
                f"Starting O*NET normalization for employee's {len(skills_json)} skills")
 
@@ -143,12 +179,11 @@ async def orchestrate_employee_flow(
 
     logger.info(f"Employee Normalization complete. {matched}/{len(normalized_skills)} matched to O*NET.")
 
-    # Finally, mark employee complete (for Stage 2 framework)
-    await db.execute(sql_update(Employee).where(Employee.id == employee_id).values(status="completed"))
-    await db.commit()
+    # ── Final status update — await this one so status is correct at close ────
+    await _db_save(db, _employee_id=employee_id, status="completed")
 
     await _pub(role_id, "db", "complete", "employee_persist_done",
                "Employee resume parsing complete.",
                data={"total_skills": len(normalized_skills)})
-    
+
     return normalized_skills

@@ -145,3 +145,5 @@ cython_debug/
 
 # VS Code
 .vscode/
+machine_learning/data/nb2_outputs/
+DB

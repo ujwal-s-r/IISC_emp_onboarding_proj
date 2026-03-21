@@ -282,7 +282,14 @@ async def normalize_skills(raw_skills: List[Dict[str, Any]], role_id: Optional[s
     """
     normalized = []
     for skill in raw_skills:
-        norm = await normalize_skill(skill["skill_name"], role_id=role_id)
+        if isinstance(skill, str):
+            skill = {"skill_name": skill}
+            
+        skill_name = skill.get("skill_name") or skill.get("name") or skill.get("skill")
+        if not skill_name or not isinstance(skill_name, str):
+            continue
+
+        norm = await normalize_skill(skill_name, role_id=role_id)
         enriched = {**skill, **norm}
         normalized.append(enriched)
     return normalized

@@ -25,7 +25,8 @@ async def tail_websocket(role_id: str, stop_phase: str):
                     print(f"\n[WS Event] {phase} | {etype} | {step}")
                     print(f"   Message: {event.get('message')}")
                 else:
-                    print(".", end="", flush=True)
+                    chunk_text = event.get('data', {}).get('text', '')
+                    print(chunk_text, end="", flush=True)
 
                 if phase == stop_phase and etype in ("complete", "error"):
                     print("\n[*] Reached stop condition.")
