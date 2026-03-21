@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { EmployerFormPanel } from "@/components/home/EmployerFormPanel";
 import { ResumePanel } from "@/components/home/ResumePanel";
@@ -44,6 +44,7 @@ export default function HomePage() {
 
   const busy = wsStatus === "connecting" || wsStatus === "open";
   const wsOpen = wsStatus === "open";
+  const employerOrchestrationRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   const { leftPane, rightPane } = useMemo(() => {
@@ -214,12 +215,17 @@ export default function HomePage() {
                   Redis → <code className="text-white/50">/ws/employer/setup/{"{role_id}"}</code>
                 </p>
               </div>
-              <div className="min-h-[200px] flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] md:min-h-[280px]">
+              <div
+                ref={employerOrchestrationRef}
+                className="min-h-[200px] flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] md:min-h-[280px]"
+              >
                 <EventTree
                   events={events}
                   streams={streams}
                   streamKey={streamKey}
                   wsOpen={wsOpen}
+                  wsStatus={wsStatus}
+                  scrollParentRef={employerOrchestrationRef}
                 />
               </div>
             </div>
