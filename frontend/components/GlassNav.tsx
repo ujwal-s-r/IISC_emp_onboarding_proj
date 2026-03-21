@@ -17,12 +17,6 @@ export function GlassNav() {
           >
             Home
           </Link>
-          <Link
-            href="/dashboard"
-            className="rounded-lg px-3 py-1.5 text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
-          >
-            Dashboard
-          </Link>
         </nav>
       </div>
     </header>

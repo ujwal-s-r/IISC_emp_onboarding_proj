@@ -1,24 +1,27 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import {
-  PHASE_LABEL,
-  PHASE_ORDER,
-  type NormalizedEmployerEvent,
-  type Phase,
-  isPhase,
-} from "@/lib/employerTypes";
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type RefObject,
+} from "react";
+import {
+  EMPLOYEE_PHASE_LABEL,
+  EMPLOYEE_PHASE_ORDER,
+  type EmployeePhase,
+  type NormalizedEmployeeEvent,
+  isEmployeePhase,
+} from "@/lib/employeeTypes";
 import { Collapsible } from "@/components/Collapsible";
 import type { StreamBuffers } from "@/hooks/useEmployerPipeline";
 
-interface JdSkill {
+interface ResumeSkill {
   skill_name: string;
-  jd_level?: string;
-  category?: string;
-  reasoning?: string;
+  context_depth?: string;
 }
 
-function LogRow({ ev }: { ev: NormalizedEmployerEvent }) {
+function LogRow({ ev }: { ev: NormalizedEmployeeEvent }) {
   return (
     <div
       data-orch-step={ev.id}
@@ -44,21 +47,39 @@ function LogRow({ ev }: { ev: NormalizedEmployerEvent }) {
 function PayloadPreview({ data }: { data: Record<string, unknown> }) {
   const keys = Object.keys(data);
   if (!keys.length) return null;
-  if (data.jd_preview && typeof data.jd_preview === "string") {
+  if (data.resume_preview && typeof data.resume_preview === "string") {
     return (
       <p className="mt-2 line-clamp-3 text-xs text-white/45">
-        JD preview: {data.jd_preview as string}
-      </p>
-    );
-  }
-  if (data.team_preview && typeof data.team_preview === "string") {
-    return (
-      <p className="mt-2 line-clamp-2 text-xs text-white/45">
-        Team preview: {data.team_preview as string}
+        Resume preview: {data.resume_preview as string}
       </p>
     );
   }
   return null;
+}
+
+function AutoScrollPre({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLPreElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [text]);
+
+  return (
+    <pre ref={ref} className={className}>
+      {text}
+    </pre>
+  );
 }
 
 function StreamBlock({
@@ -70,13 +91,6 @@ function StreamBlock({
   text: string;
   mono?: boolean;
 }) {
-  const ref = useRef<HTMLPreElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [text]);
-
   if (!text) return null;
   return (
     <Collapsible
@@ -85,43 +99,29 @@ function StreamBlock({
       defaultOpen
       className="mt-2"
     >
-      <pre
-        ref={ref}
-        className={`max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/40 p-3 text-xs leading-relaxed text-white/75 ${
+      <AutoScrollPre
+        text={text}
+        className={`max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap rounded-lg bg-black/40 p-3 text-xs leading-relaxed text-white/75 [overflow-wrap:anywhere] ${
           mono ? "font-mono" : ""
         }`}
-      >
-        {text}
-      </pre>
+      />
     </Collapsible>
   );
 }
 
-function SkillCards({ skills }: { skills: JdSkill[] }) {
+function ResumeSkillCards({ skills }: { skills: ResumeSkill[] }) {
   return (
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       {skills.map((s, i) => (
         <Collapsible
           key={`${s.skill_name}-${i}`}
           title={s.skill_name}
-          subtitle={
-            <span className="text-white/45">
-              {[s.jd_level, s.category].filter(Boolean).join(" · ")}
-            </span>
-          }
           defaultOpen={false}
-          badge={
-            s.category ? (
-              <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] uppercase text-white/50">
-                {s.category}
-              </span>
-            ) : null
-          }
         >
-          {s.reasoning ? (
-            <p className="text-sm leading-relaxed text-white/65">{s.reasoning}</p>
+          {s.context_depth ? (
+            <p className="text-sm leading-relaxed text-white/65">{s.context_depth}</p>
           ) : (
-            <p className="text-xs text-white/40">No per-skill reasoning.</p>
+            <p className="text-xs text-white/40">No context captured.</p>
           )}
         </Collapsible>
       ))}
@@ -168,6 +168,21 @@ function CandidatesTable({
   );
 }
 
+function gapCategoryClass(cat: string): string {
+  switch (cat) {
+    case "critical":
+      return "border-rose-500/30 bg-rose-500/10 text-rose-200";
+    case "moderate":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+    case "minor":
+      return "border-sky-500/30 bg-sky-500/10 text-sky-200";
+    case "met":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    default:
+      return "border-white/15 bg-white/5 text-white/60";
+  }
+}
+
 function streamSignature(streams: Record<string, StreamBuffers>): string {
   let s = "";
   for (const k of Object.keys(streams)) {
@@ -177,7 +192,7 @@ function streamSignature(streams: Record<string, StreamBuffers>): string {
   return s;
 }
 
-export function EventTree({
+export function EmployeeEventTree({
   events,
   streams,
   streamKey,
@@ -185,7 +200,7 @@ export function EventTree({
   wsStatus,
   scrollParentRef,
 }: {
-  events: NormalizedEmployerEvent[];
+  events: NormalizedEmployeeEvent[];
   streams: Record<string, StreamBuffers>;
   streamKey: (phase: string, step: string) => string;
   wsOpen: boolean;
@@ -193,8 +208,8 @@ export function EventTree({
   scrollParentRef?: RefObject<HTMLElement | null>;
 }) {
   const byPhase = useMemo(() => {
-    const m: Record<string, NormalizedEmployerEvent[]> = {};
-    for (const p of PHASE_ORDER) m[p] = [];
+    const m: Record<string, NormalizedEmployeeEvent[]> = {};
+    for (const p of EMPLOYEE_PHASE_ORDER) m[p] = [];
     for (const e of events) {
       if (!m[e.phase]) m[e.phase] = [];
       m[e.phase].push(e);
@@ -202,81 +217,115 @@ export function EventTree({
     return m;
   }, [events]);
 
-  const livePhase = useMemo((): Phase | null => {
-    const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-    const skTeam = streamKey("team_context", "team_analysis_streaming");
+  const livePhase = useMemo((): EmployeePhase | null => {
+    const skRes = streamKey("resume_extraction", "llm_extraction_streaming");
+    const skMas = streamKey("mastery", "mastery_scoring_streaming");
 
-    const jdEnded = events.some(
+    const resumeEnded = events.some(
       (e) =>
-        e.phase === "jd_extraction" &&
+        e.phase === "resume_extraction" &&
         e.type === "stream_end" &&
         e.step === "llm_extraction_streaming"
     );
-    const teamEnded = events.some(
+    const masteryEnded = events.some(
       (e) =>
-        e.phase === "team_context" &&
+        e.phase === "mastery" &&
         e.type === "stream_end" &&
-        e.step === "team_analysis_streaming"
+        e.step === "mastery_scoring_streaming"
     );
 
-    const jdBuf = streams[skJd];
-    const teamBuf = streams[skTeam];
-    const jdStreaming =
-      !jdEnded &&
+    const resBuf = streams[skRes];
+    const masBuf = streams[skMas];
+    const resumeStreaming =
+      !resumeEnded &&
       Boolean(
-        (jdBuf?.reasoning && jdBuf.reasoning.length > 0) ||
-          (jdBuf?.content && jdBuf.content.length > 0)
+        (resBuf?.reasoning && resBuf.reasoning.length > 0) ||
+          (resBuf?.content && resBuf.content.length > 0)
       );
-    const teamStreaming =
-      !teamEnded &&
+    const masteryStreaming =
+      !masteryEnded &&
       Boolean(
-        (teamBuf?.reasoning && teamBuf.reasoning.length > 0) ||
-          (teamBuf?.content && teamBuf.content.length > 0)
+        (masBuf?.reasoning && masBuf.reasoning.length > 0) ||
+          (masBuf?.content && masBuf.content.length > 0)
       );
 
-    if (jdStreaming) return "jd_extraction";
-    if (teamStreaming) return "team_context";
+    if ((wsOpen || wsStatus === "connecting") && events.length === 0) {
+      return "resume_extraction";
+    }
+    if (resumeStreaming) return "resume_extraction";
+    if (masteryStreaming) return "mastery";
 
     const last = events[events.length - 1];
-    if (last && isPhase(last.phase)) return last.phase;
+    if (last && isEmployeePhase(last.phase)) return last.phase;
 
-    if (wsOpen || wsStatus === "connecting") return "jd_extraction";
+    if (wsOpen || wsStatus === "connecting") return "resume_extraction";
     return null;
   }, [events, streams, streamKey, wsOpen, wsStatus]);
 
-  const activeStepScrollTarget = useMemo((): string | null => {
-    const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-    const skTeam = streamKey("team_context", "team_analysis_streaming");
-    const jdBuf = streams[skJd];
-    const teamBuf = streams[skTeam];
+  const streamSig = useMemo(() => streamSignature(streams), [streams]);
 
-    if ((jdBuf?.reasoning || jdBuf?.content) && wsStatus !== "closed") {
-      return "stream-jd";
-    }
-    if ((teamBuf?.reasoning || teamBuf?.content) && wsStatus !== "closed") {
-      return "stream-team";
-    }
+  const activeStepScrollTarget = useMemo((): string | null => {
+    const skRes = streamKey("resume_extraction", "llm_extraction_streaming");
+    const skMas = streamKey("mastery", "mastery_scoring_streaming");
+
+    const resumeEnded = events.some(
+      (e) =>
+        e.phase === "resume_extraction" &&
+        e.type === "stream_end" &&
+        e.step === "llm_extraction_streaming"
+    );
+    const masteryEnded = events.some(
+      (e) =>
+        e.phase === "mastery" &&
+        e.type === "stream_end" &&
+        e.step === "mastery_scoring_streaming"
+    );
+
+    const resBuf = streams[skRes];
+    const masBuf = streams[skMas];
+    const resumeStreaming =
+      !resumeEnded &&
+      Boolean(
+        (resBuf?.reasoning && resBuf.reasoning.length > 0) ||
+          (resBuf?.content && resBuf.content.length > 0)
+      );
+    const masteryStreaming =
+      !masteryEnded &&
+      Boolean(
+        (masBuf?.reasoning && masBuf.reasoning.length > 0) ||
+          (masBuf?.content && masBuf.content.length > 0)
+      );
+
+    if (resumeStreaming) return "stream-resume";
+    if (masteryStreaming) return "stream-mastery";
 
     const last = events[events.length - 1];
     if (!last) return null;
+
     if (
-      last.phase === "jd_extraction" &&
+      last.phase === "resume_extraction" &&
       last.type === "result" &&
       last.step === "llm_extraction_done"
     ) {
-      return "jd-result";
+      return "resume-result";
     }
     if (
-      last.phase === "team_context" &&
+      last.phase === "mastery" &&
       last.type === "result" &&
-      last.step === "team_analysis_done"
+      last.step === "mastery_scoring_done"
     ) {
-      return "team-result";
+      return "mastery-result";
     }
-    return last.id;
-  }, [events, streams, streamKey, wsStatus]);
+    if (
+      last.phase === "gap" &&
+      last.type === "result" &&
+      last.step === "gap_analysis_done"
+    ) {
+      return "gap-result";
+    }
 
-  const streamSig = useMemo(() => streamSignature(streams), [streams]);
+    return last.id;
+  }, [events, streams, streamKey]);
 
   useLayoutEffect(() => {
     const root = scrollParentRef?.current;
@@ -292,70 +341,82 @@ export function EventTree({
     });
   }, [activeStepScrollTarget, streamSig, scrollParentRef, livePhase]);
 
-  const jdResult = useMemo(() => {
-    const list = byPhase.jd_extraction ?? [];
+  const resumeResult = useMemo(() => {
+    const list = byPhase.resume_extraction ?? [];
     for (let i = list.length - 1; i >= 0; i--) {
       if (list[i].type === "result" && list[i].step === "llm_extraction_done") {
         return list[i];
       }
     }
     return null;
-  }, [byPhase.jd_extraction]);
+  }, [byPhase.resume_extraction]);
 
-  const jdSkills: JdSkill[] = useMemo(() => {
-    if (!jdResult?.data?.skills || !Array.isArray(jdResult.data.skills)) return [];
-    return jdResult.data.skills as JdSkill[];
-  }, [jdResult]);
-
-  const teamResult = useMemo(() => {
-    const list = byPhase.team_context ?? [];
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].type === "result" && list[i].step === "team_analysis_done") {
-        return list[i];
-      }
+  const resumeSkills: ResumeSkill[] = useMemo(() => {
+    if (!resumeResult?.data?.skills || !Array.isArray(resumeResult.data.skills)) {
+      return [];
     }
-    return null;
-  }, [byPhase.team_context]);
+    return resumeResult.data.skills as ResumeSkill[];
+  }, [resumeResult]);
 
   const masteryResult = useMemo(() => {
     const list = byPhase.mastery ?? [];
     for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].type === "result" && list[i].step === "mastery_matrix_done") {
+      if (list[i].type === "result" && list[i].step === "mastery_scoring_done") {
         return list[i];
       }
     }
     return null;
   }, [byPhase.mastery]);
 
-  if (!events.length && !wsOpen) {
+  const gapResult = useMemo(() => {
+    const list = byPhase.gap ?? [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].type === "result" && list[i].step === "gap_analysis_done") {
+        return list[i];
+      }
+    }
+    return null;
+  }, [byPhase.gap]);
+
+  const showConnecting =
+    wsStatus === "connecting" && events.length === 0 && !wsOpen;
+
+  if (!events.length && !wsOpen && wsStatus !== "connecting") {
     return (
       <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center text-sm text-white/45">
-        Run <span className="text-white/70">Start analysis</span> to stream live
-        orchestration events here.
+        Upload a resume and choose{" "}
+        <span className="text-white/70">Start resume analysis</span> to stream live
+        orchestration here.
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {PHASE_ORDER.map((phase) => {
+      {showConnecting ? (
+        <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
+          Connecting to live stream…
+        </p>
+      ) : null}
+
+      {EMPLOYEE_PHASE_ORDER.map((phase) => {
         const phaseEvents = byPhase[phase] ?? [];
         const isActive =
           livePhase === phase &&
           (wsOpen || wsStatus === "connecting" || phaseEvents.length > 0);
-        const skJd = streamKey("jd_extraction", "llm_extraction_streaming");
-        const skTeam = streamKey("team_context", "team_analysis_streaming");
+        const skRes = streamKey("resume_extraction", "llm_extraction_streaming");
+        const skMas = streamKey("mastery", "mastery_scoring_streaming");
 
         return (
           <Collapsible
             key={`${phase}:${isActive ? "live" : "idle"}`}
-            title={PHASE_LABEL[phase]}
+            defaultOpen={Boolean(isActive)}
+            title={EMPLOYEE_PHASE_LABEL[phase]}
             subtitle={
               phaseEvents.length
                 ? `${phaseEvents.length} events`
                 : "Waiting…"
             }
-            defaultOpen={phase === "jd_extraction" || isActive}
             badge={
               isActive ? (
                 <span className="animate-pulse-slow rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
@@ -368,7 +429,7 @@ export function EventTree({
               ) : null
             }
           >
-            {phase === "jd_extraction" ? (
+            {phase === "resume_extraction" ? (
               <div className="space-y-2">
                 {phaseEvents.map((e) => {
                   if (e.type === "result" && e.step === "llm_extraction_done") {
@@ -376,45 +437,50 @@ export function EventTree({
                   }
                   return <LogRow key={e.id} ev={e} />;
                 })}
-                {(streams[skJd]?.reasoning || streams[skJd]?.content) && (
+                {(streams[skRes]?.reasoning || streams[skRes]?.content) && (
                   <div
-                    data-orch-step="stream-jd"
+                    data-orch-step="stream-resume"
                     className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3"
                   >
                     <p className="text-xs font-medium text-violet-200/90">
-                      Live LLM stream
+                      Live LLM stream (resume)
                     </p>
                     <StreamBlock
                       title="Reasoning trace"
-                      text={streams[skJd]?.reasoning ?? ""}
+                      text={streams[skRes]?.reasoning ?? ""}
                     />
                     <StreamBlock
                       title="Model output (JSON)"
-                      text={streams[skJd]?.content ?? ""}
+                      text={streams[skRes]?.content ?? ""}
                     />
                   </div>
                 )}
-                {jdResult ? (
+                {resumeResult ? (
                   <div
-                    data-orch-step="jd-result"
+                    data-orch-step="resume-result"
                     className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3"
                   >
                     <p className="text-sm font-medium text-emerald-100/90">
-                      Extracted skills ({jdSkills.length})
+                      Extracted skills ({resumeSkills.length})
                     </p>
-                    {typeof jdResult.data.reasoning === "string" &&
-                    jdResult.data.reasoning ? (
+                    {(typeof resumeResult.data.reasoning_summary === "string" ||
+                      typeof resumeResult.data.reasoning === "string") &&
+                    (resumeResult.data.reasoning_summary || resumeResult.data.reasoning) ? (
                       <Collapsible
                         title="Phase reasoning summary"
                         defaultOpen={false}
                         className="mt-2 border-emerald-500/20"
                       >
                         <p className="text-sm leading-relaxed text-white/65">
-                          {jdResult.data.reasoning as string}
+                          {String(
+                            resumeResult.data.reasoning_summary ??
+                              resumeResult.data.reasoning ??
+                              ""
+                          )}
                         </p>
                       </Collapsible>
                     ) : null}
-                    <SkillCards skills={jdSkills} />
+                    <ResumeSkillCards skills={resumeSkills} />
                   </div>
                 ) : null}
               </div>
@@ -477,89 +543,56 @@ export function EventTree({
               </div>
             ) : null}
 
-            {phase === "team_context" ? (
+            {phase === "mastery" ? (
               <div className="space-y-2">
                 {phaseEvents.map((e) => {
-                  if (e.type === "result" && e.step === "team_analysis_done") {
+                  if (e.type === "result" && e.step === "mastery_scoring_done") {
                     return null;
                   }
                   return <LogRow key={e.id} ev={e} />;
                 })}
-                {(streams[skTeam]?.reasoning || streams[skTeam]?.content) && (
+                {(streams[skMas]?.reasoning || streams[skMas]?.content) && (
                   <div
-                    data-orch-step="stream-team"
-                    className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3"
+                    data-orch-step="stream-mastery"
+                    className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3"
                   >
-                    <p className="text-xs font-medium text-sky-200/90">
-                      Live team analysis stream
+                    <p className="text-xs font-medium text-amber-200/90">
+                      Live mastery scoring stream
                     </p>
                     <StreamBlock
                       title="Reasoning trace"
-                      text={streams[skTeam]?.reasoning ?? ""}
+                      text={streams[skMas]?.reasoning ?? ""}
                     />
                     <StreamBlock
-                      title="Model output"
-                      text={streams[skTeam]?.content ?? ""}
+                      title="Model output (JSON)"
+                      text={streams[skMas]?.content ?? ""}
                     />
                   </div>
                 )}
-                {teamResult ? (
+                {masteryResult?.data?.skills &&
+                Array.isArray(masteryResult.data.skills) ? (
                   <div
-                    data-orch-step="team-result"
-                    className="rounded-xl border border-sky-500/25 bg-sky-500/5 p-3"
+                    data-orch-step="mastery-result"
+                    className="overflow-x-auto rounded-xl border border-white/10"
                   >
-                    {typeof teamResult.data.reasoning === "string" &&
-                    teamResult.data.reasoning ? (
+                    {typeof masteryResult.data.reasoning_summary === "string" &&
+                    masteryResult.data.reasoning_summary ? (
                       <Collapsible
-                        title="Team analysis reasoning"
+                        title="Reasoning summary (truncated)"
                         defaultOpen={false}
-                        className="mb-3"
+                        className="mb-3 border-white/10"
                       >
-                        <p className="text-sm leading-relaxed text-white/65">
-                          {teamResult.data.reasoning as string}
+                        <p className="px-3 pb-2 text-sm leading-relaxed text-white/65">
+                          {masteryResult.data.reasoning_summary as string}
                         </p>
                       </Collapsible>
                     ) : null}
-                    <p className="text-sm font-medium text-sky-100/90">Signals</p>
-                    <ul className="mt-2 space-y-2">
-                      {Array.isArray(teamResult.data.signals)
-                        ? (teamResult.data.signals as Record<string, string>[]).map(
-                            (sig, i) => (
-                              <li
-                                key={i}
-                                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm"
-                              >
-                                <span className="font-medium text-white/85">
-                                  {sig.skill_name}
-                                </span>
-                                <span className="text-xs text-white/50">
-                                  {sig.recency_category}
-                                </span>
-                              </li>
-                            )
-                          )
-                        : null}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {phase === "mastery" ? (
-              <div className="space-y-2">
-                {phaseEvents.map((e) => (
-                  <LogRow key={e.id} ev={e} />
-                ))}
-                {masteryResult?.data?.skills &&
-                Array.isArray(masteryResult.data.skills) ? (
-                  <div className="overflow-x-auto rounded-xl border border-white/10">
-                    <table className="w-full min-w-[520px] text-left text-xs">
+                    <table className="w-full min-w-[480px] text-left text-xs">
                       <thead className="bg-white/5 text-white/50">
                         <tr>
                           <th className="px-3 py-2">Skill</th>
-                          <th className="px-3 py-2">Tier</th>
-                          <th className="px-3 py-2">Recency</th>
-                          <th className="px-3 py-2">Target</th>
+                          <th className="px-3 py-2">Depth</th>
+                          <th className="px-3 py-2">Mastery</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -572,14 +605,89 @@ export function EventTree({
                               <td className="px-3 py-2 font-medium">
                                 {String(row.skill_name ?? "")}
                               </td>
-                              <td className="px-3 py-2">{String(row.tier ?? "")}</td>
                               <td className="px-3 py-2">
-                                {String(row.team_recency ?? "")}
+                                {String(row.depth_level ?? "")}
                               </td>
+                              <td className="px-3 py-2 font-mono">
+                                {typeof row.current_mastery === "number"
+                                  ? row.current_mastery.toFixed(2)
+                                  : String(row.current_mastery ?? "")}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {phase === "gap" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => {
+                  if (e.type === "result" && e.step === "gap_analysis_done") {
+                    return null;
+                  }
+                  return <LogRow key={e.id} ev={e} />;
+                })}
+                {gapResult?.data?.ranked_gaps &&
+                Array.isArray(gapResult.data.ranked_gaps) ? (
+                  <div
+                    data-orch-step="gap-result"
+                    className="overflow-x-auto rounded-xl border border-white/10"
+                  >
+                    <table className="w-full min-w-[640px] text-left text-xs">
+                      <thead className="bg-white/5 text-white/50">
+                        <tr>
+                          <th className="px-3 py-2">Skill</th>
+                          <th className="px-3 py-2">Tier</th>
+                          <th className="px-3 py-2">Target</th>
+                          <th className="px-3 py-2">Current</th>
+                          <th className="px-3 py-2">Gap</th>
+                          <th className="px-3 py-2">Category</th>
+                          <th className="px-3 py-2">Priority</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(gapResult.data.ranked_gaps as Record<string, unknown>[]).map(
+                          (row, i) => (
+                            <tr
+                              key={i}
+                              className="border-t border-white/5 text-white/75"
+                            >
+                              <td className="px-3 py-2 font-medium">
+                                {String(row.skill_name ?? "")}
+                              </td>
+                              <td className="px-3 py-2">{String(row.tier ?? "")}</td>
                               <td className="px-3 py-2 font-mono">
                                 {typeof row.target_mastery === "number"
                                   ? row.target_mastery.toFixed(2)
                                   : String(row.target_mastery ?? "")}
+                              </td>
+                              <td className="px-3 py-2 font-mono">
+                                {typeof row.current_mastery === "number"
+                                  ? row.current_mastery.toFixed(2)
+                                  : String(row.current_mastery ?? "")}
+                              </td>
+                              <td className="px-3 py-2 font-mono">
+                                {typeof row.gap === "number"
+                                  ? row.gap.toFixed(3)
+                                  : String(row.gap ?? "")}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`inline-block rounded-full border px-2 py-0.5 text-[10px] uppercase ${gapCategoryClass(
+                                    String(row.gap_category ?? "")
+                                  )}`}
+                                >
+                                  {String(row.gap_category ?? "")}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 font-mono">
+                                {typeof row.priority_score === "number"
+                                  ? row.priority_score.toFixed(3)
+                                  : String(row.priority_score ?? "")}
                               </td>
                             </tr>
                           )
@@ -592,6 +700,22 @@ export function EventTree({
             ) : null}
 
             {phase === "db" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => (
+                  <LogRow key={e.id} ev={e} />
+                ))}
+              </div>
+            ) : null}
+
+            {phase === "path" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => (
+                  <LogRow key={e.id} ev={e} />
+                ))}
+              </div>
+            ) : null}
+
+            {phase === "journey" ? (
               <div className="space-y-2">
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
