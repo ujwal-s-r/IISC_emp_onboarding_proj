@@ -6,11 +6,11 @@ The frontend subscribes to `channel:{role_id}` and renders each event accordingl
 > **Model roles (as at March 2026)**
 > | Role | Model | Thinking |
 > |---|---|---|
-> | Phase 6 — Resume extraction | `stepfun-ai/step-3.5-flash` | OFF — full JSON in `content` |
+> | Phase 6 — Resume extraction | `qwen/qwen3.5-122b-a10b` | **ON** — CoT trace in `reasoning_content`, final JSON array in `content` |
 > | Phase 7 — O\*NET judge/coining | `openai/gpt-oss-20b` | OFF — returns `1`/`2`/`3`/`NONE` only in `content` |
 > | Phase 8 — Mastery scoring | `openai/gpt-oss-20b` | **ON** — CoT trace in `reasoning_content`, final JSON array in `content` |
 > | Phase 10 — Dependency resolution | `openai/gpt-oss-20b` | **ON** — DAG JSON in `content` |
-> | Phase 11 — Journey narration | `openai/gpt-oss-20b` | **ON** — tree + narrative JSON in `content` |
+> | Phase 11 — Journey narration | `qwen/qwen3.5-122b-a10b` | **ON** — tree + narrative JSON in `content` |
 
 > **Critical fix (March 2026):** `NvidiaLLMClient.complete()` now returns **only** `content`, never `reasoning + content` concatenated. This prevents the LLM's thinking trace from leaking into coined canonical skill names.
 
@@ -39,7 +39,7 @@ The frontend subscribes to `channel:{role_id}` and renders each event accordingl
 {
   "phase": "resume_extraction", "type": "start",
   "step": "pdf_parsing",
-  "message": "Parsing uploaded Resume PDF — skill extraction will start immediately after",
+  "message": "Parsing uploaded Resume PDF for employee",
   "model": null,
   "data": {}
 }
@@ -98,9 +98,10 @@ The frontend subscribes to `channel:{role_id}` and renders each event accordingl
   "phase": "resume_extraction", "type": "result",
   "step": "llm_extraction_done",
   "message": "LLM extracted 20 raw skills from Resume",
-  "model": "stepfun-ai/step-3.5-flash",
+  "model": "qwen/qwen3.5-122b-a10b",
   "data": {
     "raw_count": 20,
+    "reasoning": "The candidate demonstrates strong Python and PySpark usage with measurable production outcomes. Surface-level Kubernetes mention — listed only in skills section.",
     "skills": [
       { "skill_name": "Python", "context_depth": "Led development of 12 production microservices processing 2M req/day" },
       { "skill_name": "Apache Spark", "context_depth": "Architected PySpark ETL reducing runtime from 4h to 45min on 10TB" }
@@ -219,7 +220,7 @@ A new canonical node is **created in both Qdrant and Neo4j** after this event.
   "step": "normalization_done",
   "message": "11/20 skills matched to O*NET. 9 coined.",
   "model": null,
-  "data": { "matched": 11, "coined": 9, "total": 20 }
+  "data": { "matched": 11, "coined": 9, "no_match": 9, "total": 20 }
 }
 ```
 

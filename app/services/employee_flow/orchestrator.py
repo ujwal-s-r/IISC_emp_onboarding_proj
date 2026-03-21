@@ -578,7 +578,7 @@ async def orchestrate_employee_flow(
     # ── Phase 6A: Parse Resume PDF (non-blocking) ────────────────────────────
     await _pub(
         role_id, "resume_extraction", "start", "pdf_parsing",
-        "Parsing uploaded Resume PDF — skill extraction will start immediately after",
+        "Parsing uploaded Resume PDF for employee",
     )
 
     loop = asyncio.get_event_loop()
@@ -606,7 +606,7 @@ async def orchestrate_employee_flow(
         model=RESUME_MODEL,
     )
 
-    _, raw_llm_output = await resume_llm_client.stream(
+    resume_reasoning, raw_llm_output = await resume_llm_client.stream(
         RESUME_EXTRACTION_PROMPT.replace("{resume_text}", resume_text),
         temperature=0.6,
         max_tokens=16384,
@@ -625,7 +625,11 @@ async def orchestrate_employee_flow(
         role_id, "resume_extraction", "result", "llm_extraction_done",
         f"LLM extracted {len(skills_json)} raw skills from Resume",
         model=RESUME_MODEL,
-        data={"raw_count": len(skills_json), "skills": skills_json},
+        data={
+            "raw_count": len(skills_json),
+            "reasoning": resume_reasoning[:600] if resume_reasoning else "",
+            "skills": skills_json,
+        },
     )
 
     asyncio.ensure_future(
@@ -640,13 +644,14 @@ async def orchestrate_employee_flow(
 
     normalized_skills = await normalize_skills(skills_json, role_id=role_id)
 
-    matched = sum(1 for s in normalized_skills if s.get("source") == "onet_match")
-    coined  = sum(1 for s in normalized_skills if s.get("source") == "llm_new")
+    matched  = sum(1 for s in normalized_skills if s.get("source") == "onet_match")
+    coined   = sum(1 for s in normalized_skills if s.get("source") == "llm_new")
+    no_match = len(normalized_skills) - matched
 
     await _pub(
         role_id, "normalization", "complete", "normalization_done",
         f"{matched}/{len(normalized_skills)} skills matched to O*NET. {coined} coined.",
-        data={"matched": matched, "coined": coined, "total": len(normalized_skills)},
+        data={"matched": matched, "coined": coined, "no_match": no_match, "total": len(normalized_skills)},
     )
 
     # ── Phase 8: Mastery Scoring ─────────────────────────────────────────────
