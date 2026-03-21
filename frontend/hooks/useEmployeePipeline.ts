@@ -22,6 +22,7 @@ export function useEmployeePipeline(
   >("idle");
   const [pipelineDone, setPipelineDone] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const employeeRunActiveRef = useRef(false);
   const orchestrationScrollRef = useRef<HTMLDivElement>(null);
   const prevRoleIdRef = useRef<string | null | undefined>(undefined);
 
@@ -55,6 +56,7 @@ export function useEmployeePipeline(
     setStreams({});
     setEmployeeId(null);
     setPipelineDone(false);
+    employeeRunActiveRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -78,6 +80,7 @@ export function useEmployeePipeline(
       setEmployeeId(rid);
       setWsStatus("connecting");
       setLayoutFocus("resume");
+      employeeRunActiveRef.current = false;
 
       const socket = new WebSocket(employeeWsUrl(rid));
       wsRef.current = socket;
@@ -101,11 +104,20 @@ export function useEmployeePipeline(
               : {};
 
           if (type === "stream_chunk") {
+            if (phase === "resume_extraction") {
+              employeeRunActiveRef.current = true;
+            }
+            if (!employeeRunActiveRef.current) return;
             const chunkType = String(data.chunk_type ?? "");
             const text = String(data.text ?? "");
             appendStream(phase, step, chunkType, text);
             return;
           }
+
+          if (phase === "resume_extraction" && type === "start") {
+            employeeRunActiveRef.current = true;
+          }
+          if (!employeeRunActiveRef.current) return;
 
           const normalized: NormalizedEmployeeEvent = {
             id: uid(),
@@ -125,13 +137,16 @@ export function useEmployeePipeline(
             phase === "resume_extraction" ||
             phase === "normalization" ||
             phase === "mastery" ||
-            phase === "gap"
+            phase === "gap" ||
+            phase === "path" ||
+            phase === "journey"
           ) {
             setLayoutFocus("resume");
           }
           if (phase === "db" && type === "complete") {
             setPipelineDone(true);
             setLayoutFocus("resume");
+            employeeRunActiveRef.current = false;
           }
         } catch {
           /* ignore malformed */
