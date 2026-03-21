@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg0: #030303;
+  --bg1: #0a0a0a;
+  --stroke: rgba(255, 255, 255, 0.08);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg0);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(255, 255, 255, 0.09), transparent),
+    radial-gradient(ellipse 60% 50% at 100% 50%, rgba(255, 255, 255, 0.04), transparent),
+    radial-gradient(ellipse 50% 40% at 0% 80%, rgba(255, 255, 255, 0.035), transparent);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Subtle grid */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, black, transparent);
+  z-index: 0;
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04] shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset] backdrop-blur-xl;
+  }
+}
