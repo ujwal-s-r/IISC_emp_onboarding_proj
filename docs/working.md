@@ -8,7 +8,7 @@ This document provides an in-depth explanation of how the AdaptIQ backend flows 
 
 The core engine of the generic "Employer side" is the Orchestrator (`app/services/employer_flow/orchestrator.py`). It chains together PDF parsing, LLM generation, Vector search algorithms, and Graph traversals in a single asynchronous background pipeline. 
 
-It heavily utilizes WebSockets via `app/api/routers/websocket.py` to stream its current step and status back to the frontend in real-time, preventing standard HTTP timeouts on long LLM calls.
+It heavily utilizes **Redis Pub/Sub** to stream its current step, status, internal LLM reasoning, and live token streams back to the frontend in real-time, preventing standard HTTP timeouts on long LLM calls.
 
 ### Sequence Diagram: Creating a Role
 
@@ -31,15 +31,16 @@ sequenceDiagram
     
     note over API, Neo4j: Background Task Begins
 
-    API->>Socket: broadcast(step="parsing", status="in_progress")
+    API->>Redis: publish(jd_extraction, start_pdf)
     API->>PDF: extract_text(JD Bytes), extract_text(Context Bytes)
     PDF-->>API: JD Text, Context Text
     
-    API->>Socket: broadcast(step="llm_extraction")
-    API->>LLM: Prompt (JD Text) -> Extract raw skills array
-    LLM-->>API: JSON `[{"skill_name": "React", ...}]`
+    API->>Redis: publish(jd_extraction, live_stream_chunks)
+    API->>LLM: Prompt (JD) -> Stream reasoning & content -> Redis
+    LLM-->>API: JSON `[{"skill_name": "React", ...}]` (Top 15-20 skills)
+    API->>Redis: publish(jd_extraction, result)
     
-    API->>Socket: broadcast(step="normalization")
+    API->>Redis: publish(normalization, start)
     API->>Norm: normalize_skills(raw_skills)
     
     loop For Each Skill
@@ -60,14 +61,15 @@ sequenceDiagram
     end
     Norm-->>API: List of Normalized Skills with `canonical_id`
     
-    API->>Socket: broadcast(step="team_context")
-    API->>LLM: Prompt (Normalized Skills + Context Text) -> Assign Tiers
+    API->>Redis: publish(team_context, start)
+    API->>LLM: Stream (Normalized Skills + Context Text) -> Redis
     LLM-->>API: JSON `{"TECH_react": {"tier": "T1"}}`
     
     note over API: Local Math: Seniority matrix vs T1/T2/T3
+    API->>Redis: publish(mastery, result)
     
     API->>DB: persistTargetSkills(matrix_scores)
-    API->>Socket: broadcast(step="complete", status="done")
+    API->>Redis: publish(db, complete)
 ```
 
 ---
@@ -107,15 +109,16 @@ graph TD
     K --> L[Return New Canonical ID]
 ```
 
-## 🔄 3. Continuous WebSocket Integration
+## 🔄 3. Continuous Event Execution (Redis + WebSockets)
 
 Because these flows involves heavy compute (Embedding, Vector Search, LLM Generation, Graph Traversal), a single `setup-role` operation can take 10 to 45 seconds.
 
-Standard HTTP connections will timeout or leave the user staring at a blank loader. We solved this with `app/api/routers/websocket.py`.
+Standard HTTP connections will timeout or leave the user staring at a blank loader. We solved this with an event-driven architecture.
 
 * **Frontend**: Initiates a WebSocket connection: `ws://api/employer/ws/setup/{role_id}`.
 * **Backend**: 
     1. Returns a 202 Accepted HTTP response to the original POST instantly.
-    2. Modifies state locally.
-    3. Triggers `manager.broadcast_to_session(role_id, payload)` asynchronously.
-* **Result**: The frontend UI can dynamically check off boxes ("Parsing PDF..." -> "Extracting Skills..." -> "Normalizing against O*NET...") creating a modern, transparent "Execution Theatre" UX.
+    2. Spawns the Orchestrator as a Background Task.
+    3. The Orchestrator rapidly fires hundreds of JSON events representing its internal state (including live LLM text streams and reasoning blocks) to a highly concurrent **Redis Pub/Sub** channel (`channel:{role_id}`).
+    4. The WebSocket router subscribes to that Redis channel and instantly proxies those events down to the browser.
+* **Result**: The frontend UI can perfectly replicate the backend's internal thought process, reading JSON blocks from WebSockets to render a modern, transparent "Execution Theatre" typing UX.

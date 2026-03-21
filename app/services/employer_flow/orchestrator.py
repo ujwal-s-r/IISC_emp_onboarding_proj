@@ -34,6 +34,8 @@ ORCHESTRATOR_MODEL_TAG = ORCHESTRATOR_MODEL
 
 JD_EXTRACTION_PROMPT = """
 You are an expert HR and Technical Skills Analyst. Your task is to extract required skills from the following Job Description (JD).
+Focus on the 15-20 most critical/mainstream skills requested in the JD. Ignore minor or non-essential mentions.
+
 For each skill, you must identify:
 1. Canonical Skill Name (e.g., 'Apache PySpark' instead of 'Spark').
 2. Required JD Level: 'junior', 'mid', 'senior', or 'lead'.

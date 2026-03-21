@@ -25,7 +25,7 @@ All external APIs have been encapsulated behind Singleton clients for easy depen
 The entire backend flow for an Employer creating a new role is complete and verified. It lives in `app/services/employer_flow/orchestrator.py`.
 1. **API Endpoint**: `POST /employer/setup-role` accepts multipart form data (Title, Seniority, JD PDF, Team PDF) and triggers the orchestrator as a background task.
 2. **PDF Parsing**: `pdf_service.py` extracts raw text from the uploaded bytes.
-3. **Skill Extraction**: The LLM analyzes the JD to pull a raw list of required skills.
+3. **Skill Extraction**: The LLM analyzes the JD to pull a raw list of required skills. *Note: We strictly constrain the LLM to only extract the top 15-20 most critical mainstream skills to avoid taxonomy bloat.*
 4. **Team Context Analysis**: The LLM reads the Team Context PDF and assigns a `Tier` (T1-T4) to every extracted skill based on its relevance to the team's current work.
 5. **2D Mastery Matrix Computation**: A complex math step that maps the requested "Seniority" (e.g., Senior) against the "Team Tier" (e.g., T1) to generate a dynamic Target Mastery Score (0.0 to 1.0) for every single skill.
 6. **Persistence**: The final normalized skills, their relevance signals, and computed targets are saved via an async DB session to SQLite.
@@ -38,11 +38,17 @@ We implemented an Agentic 2-Stage pipeline in `app/services/skill_normalizer.py`
    * *Safety Guard:* Failsafes were added to prevent empty strings or "NONE" from polluting the database.
 
 
+### Phase 4: Redis Event-Driven Architecture
+We successfully migrated from flat WebSocket broadcasting to a highly scalable Redis Pub/Sub event bus.
+1. **Event Abstraction (`redis_client.py`)**: All backend services now use `redis_client.publish_event()` to emit standardized JSON payloads covering all 5 phases of the Employer flow.
+2. **Internal Chain-of-Thought Capture**: The normalizer and orchestrator are explicitly capturing their internal LLM `reasoning` buffers and emitting them in the Redis events. This provides the Frontend execution UI full observability into *why* the backend is making its decisions.
+3. **Real-time LLM Streaming**: We integrated `stepfun-ai/step-3.5-flash` natively. During heavy generations (like extracting skills or analyzing the team context), the backend streams `stream_chunk` events over Redis to the frontend in real-time, achieving a fast "typing" UX effect.
+
 ---
 
 ## 🟡 Remaining Phases & Next Steps
 
-### Phase 4: The Employee Flow (Onboarding Setup)
+### Phase 5: The Employee Flow (Onboarding Setup)
 This is the immediate next chunk of work. We need to mirror the employer flow structure for the employee.
 
 1. **API Endpoint**: Create `POST /api/v1/employee/onboard-path` inside a new router (`app/api/routers/employee.py`). It should accept a Resume PDF and link to an existing `role_id`.

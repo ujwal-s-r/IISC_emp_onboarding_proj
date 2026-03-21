@@ -1,35 +1,52 @@
-from fastapi import WebSocket
-from typing import Dict, List
-from app.utils.logger import logger
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import asyncio
 import json
+import redis.asyncio as aioredis
+from app.config import settings
+from app.utils.logger import logger
 
-class ConnectionManager:
-    def __init__(self):
-        # Maps session_id/role_id to list of active websockets
-        self.active_connections: Dict[str, List[WebSocket]] = {}
+router = APIRouter(prefix="/ws", tags=["WebSockets"])
 
-    async def connect(self, session_id: str, websocket: WebSocket):
-        await websocket.accept()
-        if session_id not in self.active_connections:
-            self.active_connections[session_id] = []
-        self.active_connections[session_id].append(websocket)
-        logger.info(f"WebSocket connected for session: {session_id}")
+@router.websocket("/employer/setup/{role_id}")
+async def employer_setup_websocket(websocket: WebSocket, role_id: str):
+    """
+    Subscribes to the Redis channel for the given role_id and streams
+    all orchestration events down to the connected frontend client.
+    """
+    await websocket.accept()
+    logger.info(f"Frontend WebSocket connected for role_id: {role_id}")
 
-    def disconnect(self, session_id: str, websocket: WebSocket):
-        if session_id in self.active_connections:
-            if websocket in self.active_connections[session_id]:
-                self.active_connections[session_id].remove(websocket)
-            if not self.active_connections[session_id]:
-                del self.active_connections[session_id]
-        logger.info(f"WebSocket disconnected for session: {session_id}")
+    redis_conn = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis_conn.pubsub()
+    channel_name = f"channel:{role_id}"
 
-    async def broadcast_to_session(self, session_id: str, message: dict):
-        if session_id in self.active_connections:
-            for connection in self.active_connections[session_id]:
-                try:
-                    await connection.send_text(json.dumps(message))
-                except Exception as e:
-                    logger.error(f"Error broadcasting to session {session_id}: {str(e)}")
+    try:
+        await pubsub.subscribe(channel_name)
+        logger.debug(f"Subscribed to Redis {channel_name}")
 
-manager = ConnectionManager()
+        async for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
 
+            # Proxy the JSON event directly to the frontend
+            event_data_str = message["data"]
+            await websocket.send_text(event_data_str)
+
+            # Check if this is the final event or an error
+            event_dict = json.loads(event_data_str)
+            if event_dict.get("type") in ("complete", "error"):
+                logger.info(f"Received terminal event '{event_dict.get('type')}' for {role_id}. Closing WS.")
+                break
+
+    except WebSocketDisconnect:
+        logger.info(f"Frontend WebSocket disconnected for {role_id}")
+    except Exception as e:
+        logger.error(f"WebSocket Error for {role_id}: {e}")
+    finally:
+        await pubsub.unsubscribe(channel_name)
+        await redis_conn.aclose()
+        # Ensure we close our end of the socket if we broke out of the loop normally
+        try:
+            await websocket.close()
+        except:
+            pass
