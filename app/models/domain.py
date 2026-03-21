@@ -62,3 +62,44 @@ class GraphExpansion(Base):
     parent_skills = Column(JSON) # List of inferred prerequisites
     source_role_id = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class Employee(Base):
+    __tablename__ = "employees"
+
+    id = Column(String, primary_key=True, index=True)
+    role_id = Column(String, ForeignKey("roles.id"))
+    resume_text = Column(String, nullable=True)
+    career_timeline = Column(JSON, nullable=True) # Full parsed JSON from LLM
+    status = Column(String, default="pending") # pending, processing, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    role = relationship("Role")
+    mastery_scores = relationship("EmployeeMastery", back_populates="employee", cascade="all, delete-orphan")
+    learning_paths = relationship("LearningPath", back_populates="employee", cascade="all, delete-orphan")
+
+class EmployeeMastery(Base):
+    __tablename__ = "employee_mastery"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    employee_id = Column(String, ForeignKey("employees.id"))
+    skill_name = Column(String, index=True)
+    canonical_id = Column(String, nullable=True)
+    current_mastery = Column(Float)
+    assessment_reasoning = Column(String, nullable=True)
+
+    employee = relationship("Employee", back_populates="mastery_scores")
+
+class LearningPath(Base):
+    __tablename__ = "learning_paths"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    employee_id = Column(String, ForeignKey("employees.id"))
+    skill_name = Column(String, index=True)
+    canonical_id = Column(String, nullable=True)
+    tier = Column(String) # From the employer Role's target
+    course_title = Column(String, nullable=True)
+    course_url = Column(String, nullable=True)
+    reasoning_trace = Column(String, nullable=True)
+    sequence_order = Column(Integer) # For DAG/Topological order
+
+    employee = relationship("Employee", back_populates="learning_paths")

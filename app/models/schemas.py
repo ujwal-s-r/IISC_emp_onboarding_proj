@@ -39,3 +39,26 @@ class WebSocketMessage(BaseModel):
     message: str
     data: Optional[dict] = None
 
+class EmployeeBase(BaseModel):
+    role_id: str
+    status: str
+
+class LearningPathResponse(BaseModel):
+    skill_name: str
+    tier: str
+    course_title: Optional[str]
+    course_url: Optional[str]
+    reasoning_trace: Optional[str]
+    sequence_order: int
+
+    class Config:
+        from_attributes = True
+
+class EmployeeResponse(EmployeeBase):
+    id: str
+    resume_text: Optional[str] = None
+    learning_paths: List[LearningPathResponse] = []
+
+    class Config:
+        from_attributes = True
+

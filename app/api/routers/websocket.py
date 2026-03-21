@@ -50,3 +50,44 @@ async def employer_setup_websocket(websocket: WebSocket, role_id: str):
             await websocket.close()
         except:
             pass
+
+@router.websocket("/employee/setup/{employee_id}")
+async def employee_setup_websocket(websocket: WebSocket, employee_id: str):
+    """
+    Subscribes to the Redis channel for the given employee_id and streams
+    all orchestration events down to the connected frontend client.
+    """
+    await websocket.accept()
+    logger.info(f"Frontend WebSocket connected for employee_id: {employee_id}")
+
+    redis_conn = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis_conn.pubsub()
+    channel_name = f"channel:{employee_id}"
+
+    try:
+        await pubsub.subscribe(channel_name)
+        logger.debug(f"Subscribed to Redis {channel_name}")
+
+        async for message in pubsub.listen():
+            if message["type"] != "message":
+                continue
+
+            event_data_str = message["data"]
+            await websocket.send_text(event_data_str)
+
+            event_dict = json.loads(event_data_str)
+            if event_dict.get("type") in ("complete", "error"):
+                logger.info(f"Received terminal event '{event_dict.get('type')}' for {employee_id}. Closing WS.")
+                break
+
+    except WebSocketDisconnect:
+        logger.info(f"Frontend WebSocket disconnected for {employee_id}")
+    except Exception as e:
+        logger.error(f"WebSocket Error for {employee_id}: {e}")
+    finally:
+        await pubsub.unsubscribe(channel_name)
+        await redis_conn.aclose()
+        try:
+            await websocket.close()
+        except:
+            pass

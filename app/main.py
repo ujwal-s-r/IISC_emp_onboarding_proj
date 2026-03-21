@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from app.utils.logger import logger
 from app.utils.exceptions import AdaptIQException
 from app.config import settings
-from app.api.routers import employer
+from app.api.routers import employer, employee
 from app.api.routers.websocket import router as websocket_router
 from app.db.session import engine, Base
 
@@ -11,6 +11,7 @@ app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
 
 # Mount Routers
 app.include_router(employer.router, prefix="/api/v1")
+app.include_router(employee.router, prefix="/api/v1")
 app.include_router(websocket_router)
 
 @app.exception_handler(AdaptIQException)
