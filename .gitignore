@@ -147,3 +147,5 @@ cython_debug/
 .vscode/
 machine_learning/data/nb2_outputs/
 DB/
+app/db/adaptiq.db
+DB/adaptiq.db

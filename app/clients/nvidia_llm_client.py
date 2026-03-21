@@ -6,13 +6,14 @@ https://integrate.api.nvidia.com/v1
 
 Supports four purpose-built model roles:
   - JUDGE_MODEL        = openai/gpt-oss-20b          (skill normalisation judge/coining — no thinking)
-  - ORCHESTRATOR_MODEL = stepfun-ai/step-3.5-flash   (JD extraction + team context)
-  - RESUME_MODEL       = stepfun-ai/step-3.5-flash   (resume extraction — no thinking)
-  - MASTERY_MODEL      = openai/gpt-oss-20b           (mastery scoring — thinking ON)
+  - ORCHESTRATOR_MODEL = stepfun-ai/step-3.5-flash        (JD extraction + team context)
+  - RESUME_MODEL       = qwen/qwen3.5-122b-a10b           (resume extraction — thinking ON)
+  - MASTERY_MODEL      = openai/gpt-oss-20b               (mastery scoring — thinking ON)
 
 Thinking mode is model-aware:
   - gpt-oss-20b: extra_body chat_template_kwargs {"thinking": True}
     reasoning_content = CoT trace; content = final JSON answer (separate budgets)
+  - qwen3.5-122b: chat_template_kwargs {"enable_thinking": True} (same split as gpt-oss-20b)
   - GLM4.7 (legacy): chat_template_kwargs {enable_thinking, clear_thinking}
 
 All models stream and return (reasoning, content) tuples.
@@ -32,7 +33,7 @@ _RESET         = "\033[0m"  if _USE_COLOR else ""
 
 JUDGE_MODEL        = "openai/gpt-oss-20b"
 ORCHESTRATOR_MODEL = "stepfun-ai/step-3.5-flash"
-RESUME_MODEL       = "stepfun-ai/step-3.5-flash"
+RESUME_MODEL       = "qwen/qwen3.5-122b-a10b"
 MASTERY_MODEL      = "openai/gpt-oss-20b"
 
 
@@ -87,6 +88,11 @@ class NvidiaLLMClient:
                             "enable_thinking": True,
                             "clear_thinking":  False,
                         }
+                    }
+                elif "qwen" in self.model.lower():
+                    # qwen3.5-122b: uses enable_thinking (no clear_thinking key)
+                    create_kwargs["extra_body"] = {
+                        "chat_template_kwargs": {"enable_thinking": True}
                     }
                 else:
                     # gpt-oss-20b and compatible models
@@ -155,24 +161,95 @@ class NvidiaLLMClient:
             return "", "NONE"
 
     async def complete(self, prompt: str, max_tokens: int = 4096) -> str:
-        """ Legacy compatibility for the normalizer LLM judge. """
+        """ Legacy compatibility for the normalizer LLM judge.
+            Returns only the final content, ignoring CoT reasoning.
+        """
         reasoning, content = await self.stream(prompt, max_tokens=max_tokens)
-        combined = (reasoning + "\n" + content).strip() if reasoning else content
-        return combined if combined else "NONE"
+        return content.strip() if content else "NONE"
 
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 
-# Used by skill_normalizer for O*NET judge + coining (no thinking, logic-focused)
-nvidia_llm_client = NvidiaLLMClient(model=JUDGE_MODEL)
+# Used by skill_normalizer for O*NET judge + coining
+# enable_thinking=True so CoT goes to reasoning_content; content = clean "1"/"2"/"3"/"NONE"/coined name
+judge_llm_client = NvidiaLLMClient(model=JUDGE_MODEL, enable_thinking=True)
+
+# Legacy alias kept so any existing imports of nvidia_llm_client still work
+nvidia_llm_client = judge_llm_client
 
 # Used by employer/employee orchestrators for JD extraction + team context
 orchestrator_llm_client = NvidiaLLMClient(model=ORCHESTRATOR_MODEL)
 
 # Used by employee orchestrator for resume extraction
-# stepfun-ai/step-3.5-flash — no thinking, outputs JSON directly in content chunks
-resume_llm_client = NvidiaLLMClient(model=RESUME_MODEL, enable_thinking=False)
+# qwen/qwen3.5-122b-a10b — thinking ON: reasoning_content = CoT, content = JSON answer
+resume_llm_client = NvidiaLLMClient(model=RESUME_MODEL, enable_thinking=True)
 
 # Used by employee orchestrator for mastery scoring
 # gpt-oss-20b with thinking ON — reasoning_content = CoT, content = final JSON
 mastery_llm_client = NvidiaLLMClient(model=MASTERY_MODEL, enable_thinking=True)
+
+# Used by path generation for dependency resolution (thinking ON for DAG reasoning)
+dependency_llm_client = NvidiaLLMClient(model=MASTERY_MODEL, enable_thinking=True)
+
+# Used by Phase 11 — Journey Narration (thinking ON — highest quality)
+narrator_llm_client = NvidiaLLMClient(model=RESUME_MODEL, enable_thinking=True)
+
+
+# ── Nvidia Embedding Client ───────────────────────────────────────────────────
+
+from openai import OpenAI as _OpenAI_Sync
+from typing import List as _List
+
+EMBEDDING_MODEL = "nvidia/llama-3.2-nemoretriever-300m-embed-v1"
+EMBEDDING_DIM   = 2048
+
+
+class NvidiaEmbeddingClient:
+    """
+    Synchronous embedding client using the Nvidia NemoRetriever API.
+    Produces 1024-dimensional dense vectors.
+
+    Two input types:
+      - "passage" : for indexing documents into Qdrant (ingest time)
+      - "query"   : for searching Qdrant at runtime (skill gap queries)
+
+    Used exclusively for the `courses` Qdrant collection.
+    The O*NET collection retains the local SentenceTransformer (384-dim).
+    """
+
+    def __init__(self):
+        self.client = _OpenAI_Sync(
+            api_key=settings.NVIDIA_API_KEY,
+            base_url="https://integrate.api.nvidia.com/v1",
+        )
+        logger.info(f"NvidiaEmbeddingClient initialized | model={EMBEDDING_MODEL} | dim={EMBEDDING_DIM}")
+
+    def embed_passages(self, texts: _List[str]) -> _List[_List[float]]:
+        """
+        Embed a batch of document passages for ingestion into Qdrant.
+        input_type = "passage" tells NemoRetriever to optimise for indexing.
+        """
+        response = self.client.embeddings.create(
+            input=texts,
+            model=EMBEDDING_MODEL,
+            encoding_format="float",
+            extra_body={"input_type": "passage", "truncate": "END"},
+        )
+        return [item.embedding for item in response.data]
+
+    def embed_query(self, text: str) -> _List[float]:
+        """
+        Embed a single query string for ANN search in Qdrant.
+        input_type = "query" tells NemoRetriever to optimise for retrieval.
+        """
+        response = self.client.embeddings.create(
+            input=[text],
+            model=EMBEDDING_MODEL,
+            encoding_format="float",
+            extra_body={"input_type": "query", "truncate": "END"},
+        )
+        return response.data[0].embedding
+
+
+# Singleton — used by ingest_courses.py and path_generator.py
+nvidia_embedding_client = NvidiaEmbeddingClient()
