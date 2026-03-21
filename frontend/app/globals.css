@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg0: #030303;
+  --bg1: #0a0a0a;
+  --stroke: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.14);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg0);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -30%, rgba(255, 255, 255, 0.1), transparent),
+    radial-gradient(ellipse 55% 45% at 100% 20%, rgba(120, 200, 255, 0.06), transparent),
+    radial-gradient(ellipse 50% 40% at 0% 85%, rgba(255, 255, 255, 0.04), transparent);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 35%, black, transparent 78%);
+  z-index: 0;
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply rounded-2xl border shadow-lg;
+    border-color: var(--glass-border);
+    background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.09) 0%,
+      rgba(255, 255, 255, 0.03) 50%,
+      rgba(255, 255, 255, 0.06) 100%
+    );
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+      0 25px 50px -28px rgba(0, 0, 0, 0.85),
+      0 0 80px -40px rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+  }
+
+  .glass-pane-split {
+    @apply rounded-2xl border transition-all duration-500 ease-out;
+    border-color: rgba(255, 255, 255, 0.12);
+    background: linear-gradient(
+      160deg,
+      rgba(255, 255, 255, 0.08) 0%,
+      rgba(255, 255, 255, 0.02) 100%
+    );
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+      0 18px 40px -24px rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+  }
+
+  .glass-pane-split--focus {
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+      0 0 0 1px rgba(255, 255, 255, 0.12),
+      0 28px 56px -20px rgba(0, 0, 0, 0.65),
+      0 0 100px -35px rgba(255, 255, 255, 0.12);
+  }
+
+  /* Only dim the non-focused column on true split layout (md+) */
+  @media (min-width: 768px) {
+    .glass-pane-split--dim {
+      opacity: 0.82;
+      transform: scale(0.988);
+      filter: saturate(0.92);
+    }
+  }
+
+  .glass-toolbar {
+    @apply flex flex-wrap items-center gap-2 rounded-2xl border px-3 py-2.5 sm:px-4;
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  }
+}

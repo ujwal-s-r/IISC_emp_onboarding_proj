@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.utils.logger import logger
 from app.utils.exceptions import AdaptIQException
@@ -8,6 +9,17 @@ from app.api.routers.websocket import router as websocket_router
 from app.db.session import engine, Base
 
 app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Mount Routers
 app.include_router(employer.router, prefix="/api/v1")

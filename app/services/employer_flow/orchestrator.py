@@ -150,6 +150,9 @@ async def persist_metrics(db: AsyncSession, role_id: str, final_skills: List[Dic
             canonical_id       = s.get("canonical_id"),
             target_mastery     = s["target_mastery"],
             knowledge_category = s.get("category"),
+            team_relevance     = TIER_RELEVANCE.get(tier, 0.1),
+            priority_tier      = tier,
+            reasoning          = s.get("reasoning"),
         ))
 
         if recency != "none":
