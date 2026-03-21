@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 type TrackKey = "sprint" | "balanced" | "quality";
 
@@ -148,178 +148,118 @@ function parseJourney(data: Record<string, unknown>) {
   };
 }
 
-function splitLabel(text: string, maxLen = 24): string[] {
-  const words = text.trim().split(/\s+/);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    const next = cur ? `${cur} ${w}` : w;
-    if (next.length <= maxLen) {
-      cur = next;
-      continue;
-    }
-    if (cur) lines.push(cur);
-    cur = w;
-  }
-  if (cur) lines.push(cur);
-  if (lines.length <= 2) return lines;
-  return [lines[0], `${lines[1].slice(0, Math.max(6, maxLen - 1))}…`];
-}
-
-function JourneyGraph({ roleLabel, nodes }: { roleLabel: string; nodes: BranchNode[] }) {
+function JourneyGraph({ nodes }: { nodes: BranchNode[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<{
     x: number;
     y: number;
     node: BranchNode;
   } | null>(null);
 
-  const geometry = useMemo(() => {
-    const maxStage = Math.max(1, ...nodes.map((n) => n.stage));
-    const stageGroups: Record<number, BranchNode[]> = {};
-    for (let s = 1; s <= maxStage; s++) stageGroups[s] = [];
-    for (const n of nodes) {
-      if (!stageGroups[n.stage]) stageGroups[n.stage] = [];
-      stageGroups[n.stage].push(n);
-    }
-    for (let s = 1; s <= maxStage; s++) {
-      stageGroups[s].sort((a, b) => a.label.localeCompare(b.label));
+  const rows = useMemo(() => {
+    const sorted = [...nodes].sort((a, b) =>
+      a.stage === b.stage ? a.label.localeCompare(b.label) : a.stage - b.stage
+    );
+
+    const labelToStage = new Map<string, number>();
+    for (const n of sorted) {
+      labelToStage.set(n.label.trim().toLowerCase(), n.stage);
     }
 
-    const maxNodesInStage = Math.max(1, ...Object.values(stageGroups).map((arr) => arr.length));
-    const width = Math.max(1280, 400 + maxStage * 300 + 260);
-    const height = Math.max(560, 180 + maxNodesInStage * 120);
-    const root = { x: 120, y: Math.round(height / 2) };
-
-    const pos: Record<string, { x: number; y: number; node: BranchNode }> = {};
-    for (let s = 1; s <= maxStage; s++) {
-      const arr = stageGroups[s];
-      const x = 360 + (s - 1) * 280;
-      const step = height / (arr.length + 1);
-      arr.forEach((n, i) => {
-        pos[n.id] = { x, y: Math.round((i + 1) * step), node: n };
-      });
-    }
-
-    return { maxStage, width, height, root, pos, stageGroups };
+    return sorted.map((n) => {
+      const depStages = Array.from(
+        new Set(
+          n.twigs
+            .map((t) => labelToStage.get(t.label.trim().toLowerCase()))
+            .filter((v): v is number => typeof v === "number")
+        )
+      ).sort((a, b) => a - b);
+      const stageChain = [n.stage, ...depStages.filter((s) => s !== n.stage)];
+      return {
+        node: n,
+        stageChain: stageChain.length ? stageChain : [n.stage],
+      };
+    });
   }, [nodes]);
 
   return (
-    <div className="relative mt-3 overflow-x-auto rounded-xl border border-white/10 bg-black/25 p-3">
-      <svg
-        viewBox={`0 0 ${geometry.width} ${geometry.height}`}
-        className="block h-auto min-w-[1024px] w-full"
-      >
-        {Array.from({ length: geometry.maxStage }, (_, i) => i + 1).map((stage) => {
-          const x = 360 + (stage - 1) * 280;
+    <div ref={containerRef} className="relative mt-3 rounded-xl border border-white/10 bg-black/25 p-4">
+      <div className="relative pl-6">
+        <div className="absolute bottom-3 left-2 top-3 w-px bg-white/20" />
+
+        {rows.map((row, idx) => {
+          const n = row.node;
+          const fill = n.severity === "critical" ? "bg-rose-900/75" : "bg-amber-900/70";
           return (
-            <text
-              key={`stage-${stage}`}
-              x={x}
-              y={36}
-              fill="#CBD5E1"
-              fontSize="14"
-              textAnchor="middle"
-              fontWeight="600"
+            <div
+              key={n.id}
+              className={`relative mb-5 rounded-xl border border-white/10 bg-white/[0.02] p-3 ${
+                idx === rows.length - 1 ? "mb-0" : ""
+              }`}
             >
-              {`Stage ${stage}`}
-            </text>
+              <div className="absolute -left-[18px] top-7 h-3 w-3 rounded-full border border-white/40 bg-slate-950" />
+
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-5">
+                <button
+                  type="button"
+                  className={`w-full max-w-xl rounded-xl border border-white/20 px-4 py-3 text-left shadow-sm ${fill}`}
+                  onMouseLeave={() => setHovered(null)}
+                  onMouseMove={(e) => {
+                    const host = containerRef.current;
+                    if (!host) return;
+                    const r = host.getBoundingClientRect();
+                    setHovered({
+                      x: e.clientX - r.left + 14,
+                      y: e.clientY - r.top + 14,
+                      node: n,
+                    });
+                  }}
+                >
+                  <p className="text-sm font-semibold text-white">{n.label}</p>
+                  <p className="mt-1 text-xs text-white/80">Main type</p>
+                </button>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {row.stageChain.map((s, i) => (
+                      <div key={`${n.id}-stage-${s}-${i}`} className="flex items-center gap-2">
+                        <span className="rounded-lg border border-slate-400/40 bg-slate-800 px-3 py-1 text-xs text-slate-100">
+                          {`Stage ${s}`}
+                        </span>
+                        {i < row.stageChain.length - 1 ? (
+                          <span className="text-white/65">→</span>
+                        ) : null}
+                      </div>
+                    ))}
+                    <span className="rounded-lg border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white/70">
+                      {`Gap ${(n.gap * 100).toFixed(0)}%`}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {n.twigs.length ? (
+                      n.twigs.map((t) => (
+                        <span
+                          key={t.id}
+                          className="rounded-full border border-slate-400/30 bg-slate-900/80 px-2.5 py-1 text-[11px] text-slate-200"
+                        >
+                          {t.label}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-white/50">No child dependency</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           );
         })}
-
-        {nodes.map((n) => {
-          const p = geometry.pos[n.id];
-          return (
-            <line
-              key={`edge-root-${n.id}`}
-              x1={geometry.root.x}
-              y1={geometry.root.y}
-              x2={p.x}
-              y2={p.y}
-              stroke={n.borderColor}
-              strokeOpacity={0.65}
-              strokeWidth={Math.max(1.8, 2.2 + n.gap * 3)}
-            />
-          );
-        })}
-        {nodes.flatMap((n) => {
-          const p = geometry.pos[n.id];
-          const total = n.twigs.length;
-          return n.twigs.map((twig, i) => {
-            const tx = p.x + 190;
-            const ty = p.y + (i - (total - 1) / 2) * 42;
-            return (
-              <g key={`twig-${twig.id}`}>
-                <line
-                  x1={p.x + 96}
-                  y1={p.y}
-                  x2={tx - 14}
-                  y2={ty}
-                  stroke="#9CA3AF"
-                  strokeDasharray="5 4"
-                  strokeOpacity={0.8}
-                  strokeWidth={1.5}
-                />
-                <circle cx={tx} cy={ty} r={11} fill="#0F172A" stroke="#94A3B8" />
-                <text x={tx + 15} y={ty + 4} fill="#CBD5E1" fontSize="11">
-                  {twig.label}
-                </text>
-              </g>
-            );
-          });
-        })}
-
-        <g>
-          <circle cx={geometry.root.x} cy={geometry.root.y} r={44} fill="#1E3A8A" />
-          <text x={geometry.root.x} y={geometry.root.y - 5} fill="#fff" fontSize="13" textAnchor="middle">
-            Goal
-          </text>
-          <text x={geometry.root.x} y={geometry.root.y + 13} fill="#DBEAFE" fontSize="12" textAnchor="middle">
-            {roleLabel}
-          </text>
-        </g>
-
-        {nodes.map((n) => {
-          const p = geometry.pos[n.id];
-          const fill = n.severity === "critical" ? "#7F1D1D" : "#713F12";
-          const lines = splitLabel(n.label);
-          return (
-            <g key={`node-${n.id}`}>
-              <rect
-                x={p.x - 96}
-                y={p.y - 30}
-                width={192}
-                height={60}
-                rx={14}
-                fill={fill}
-                stroke={n.borderColor}
-                strokeWidth={2}
-                onMouseLeave={() => setHovered(null)}
-                onMouseMove={(e) => {
-                  const box = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
-                  setHovered({
-                    x: e.clientX - box.left + 12,
-                    y: e.clientY - box.top + 12,
-                    node: n,
-                  });
-                }}
-              />
-              <text x={p.x} y={p.y - 7} fill="#fff" fontSize="11" textAnchor="middle">
-                {lines[0]}
-              </text>
-              <text x={p.x} y={p.y + 7} fill="#fff" fontSize="11" textAnchor="middle">
-                {lines[1] ?? ""}
-              </text>
-              <text x={p.x} y={p.y + 20} fill="#E5E7EB" fontSize="10" textAnchor="middle">
-                {`Stage ${n.stage} · Gap ${(n.gap * 100).toFixed(0)}%`}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+      </div>
 
       {hovered ? (
         <div
-          className="pointer-events-none absolute z-10 max-w-[380px] rounded-lg border border-white/20 bg-slate-900/95 p-3 text-xs text-white shadow-xl"
+          className="pointer-events-none absolute z-10 max-w-[420px] rounded-lg border border-white/20 bg-slate-900/95 p-3 text-xs text-white shadow-xl"
           style={{ left: hovered.x, top: hovered.y }}
         >
           <p className="text-sm font-semibold">{hovered.node.label}</p>
@@ -368,7 +308,9 @@ export function JourneyTrackGraphs({
 
   return (
     <section className="mt-6 rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/[0.03] p-4 sm:p-5">
-      <h3 className="text-lg font-semibold text-white/95">Phase 11 journey roadmap</h3>
+      <h3 className="text-lg font-semibold text-white/95">
+        {`Phase 11 journey roadmap — ${parsed.roleLabel}`}
+      </h3>
       {parsed.validationNotes ? (
         <p className="mt-1 text-xs text-white/60">Validation: {parsed.validationNotes}</p>
       ) : null}
@@ -380,10 +322,6 @@ export function JourneyTrackGraphs({
               {track.level}
             </p>
             <p className="text-lg font-semibold text-white/95">{track.title}</p>
-            <p className="mt-1 text-sm text-white/85">
-              {track.weeks !== null ? `${track.weeks} weeks` : "Weeks n/a"} ·{" "}
-              {track.coverage !== null ? `${track.coverage}% coverage` : "Coverage n/a"}
-            </p>
             {track.narrative ? (
               <p className="mt-2 text-sm leading-relaxed text-white/90">{track.narrative}</p>
             ) : null}
@@ -391,7 +329,7 @@ export function JourneyTrackGraphs({
         ))}
       </div>
 
-      <JourneyGraph roleLabel={parsed.roleLabel} nodes={parsed.nodes} />
+      <JourneyGraph nodes={parsed.nodes} />
     </section>
   );
 }
