@@ -66,7 +66,7 @@ export function ResumePanel({
       const body = (await res.json()) as { id: string };
       if (!body.id) throw new Error("No employee id returned");
       setMsg(`Session ${body.id.slice(0, 8)}… — streaming pipeline.`);
-      onEmployeeSessionStart(body.id);
+      onEmployeeSessionStart(roleId);
       e.currentTarget.reset();
     } catch (er) {
       setErr(er instanceof Error ? er.message : "Upload failed");
@@ -165,7 +165,7 @@ export function ResumePanel({
             <h3 className="text-sm font-semibold text-white/90">Live orchestration</h3>
             <p className="mt-0.5 text-[11px] text-white/40">
               Redis →{" "}
-              <code className="text-white/50">/ws/employee/setup/{"{employee_id}"}</code>
+              <code className="text-white/50">/ws/employer/setup/{"{role_id}"}</code>
             </p>
           </div>
           <div

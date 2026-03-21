@@ -69,17 +69,17 @@ export function useEmployeePipeline(
   }, [roleId, clearSession]);
 
   const connect = useCallback(
-    (eid: string) => {
+    (rid: string) => {
       wsRef.current?.close();
       wsRef.current = null;
       setEvents([]);
       setStreams({});
       setPipelineDone(false);
-      setEmployeeId(eid);
+      setEmployeeId(rid);
       setWsStatus("connecting");
       setLayoutFocus("resume");
 
-      const socket = new WebSocket(employeeWsUrl(eid));
+      const socket = new WebSocket(employeeWsUrl(rid));
       wsRef.current = socket;
 
       socket.onopen = () => {

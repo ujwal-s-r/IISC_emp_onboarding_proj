@@ -2,7 +2,7 @@
 Employee Flow Orchestrator
 ==========================
 Orchestrates the employee onboarding analysis pipeline (Phases 6–9).
-Publishes events to Redis channel:{employee_id} (per-employee; not the employer role channel).
+Publishes events to Redis channel:{role_id} shared with the employer flow.
 
 Phases:
   Phase 6 — resume_extraction : PDF parse (async, non-blocking) + LLM skill extraction
@@ -557,8 +557,8 @@ async def orchestrate_employee_flow(
       - Every DB write is fire-and-forget (asyncio.ensure_future) so the LLM
         starts immediately without waiting for persistence to complete.
     """
-    # Redis/WebSocket channel for this employee session (do not use role_id — avoids mixing with employer events)
-    pub_id = employee_id
+    # Employee flow continues on the same role channel for a continuous UI session.
+    pub_id = role_id
 
     # ── Phase 6A: Parse Resume PDF (non-blocking) ────────────────────────────
     await _pub(
