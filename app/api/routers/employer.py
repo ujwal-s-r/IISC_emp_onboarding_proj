@@ -47,15 +47,33 @@ async def setup_role(
     seniority: str = Form(...),
     jd_file: Optional[UploadFile] = File(None),
     jd_text: Optional[str] = Form(None),
-    team_context_file: UploadFile = File(...),
+    team_context_file: Optional[UploadFile] = File(None),
+    team_context_text: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     role_id = f"role_{uuid.uuid4().hex[:8]}"
     logger.info(f"Initializing role setup: '{title}' | ID: {role_id}")
 
-    # Read bytes *now* (UploadFile is closed once response is sent)
-    jd_bytes   = await jd_file.read() if jd_file else (jd_text or "").encode()
-    team_bytes = await team_context_file.read()
+    # Read bytes from file if provided and not empty; else fallback to text
+    jd_bytes = b""
+    if jd_file:
+        jd_bytes = await jd_file.read()
+    if not jd_bytes and jd_text:
+        jd_bytes = jd_text.encode()
+
+    team_bytes = b""
+    if team_context_file:
+        team_bytes = await team_context_file.read()
+    if not team_bytes and team_context_text:
+        team_bytes = team_context_text.encode()
+
+    if not jd_bytes.strip():
+        raise HTTPException(status_code=422, detail="Provide jd_file or jd_text.")
+    if not team_bytes.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Provide team_context_file or team_context_text.",
+        )
 
     # Create pending role record
     db_role = Role(

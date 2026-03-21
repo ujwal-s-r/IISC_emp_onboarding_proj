@@ -14,3 +14,7 @@ Next.js (App Router) UI for employer setup, live WebSocket streaming, and resume
 - **/dashboard** — Lists roles via `GET /api/v1/employer/roles`.
 
 Backend CORS is enabled for `localhost:3000` in `app/main.py`.
+
+## Note on `vite-legacy/`
+
+An older Vite + `src/pages` prototype was moved to `vite-legacy/` because **Next.js treats `src/pages` as the Pages Router** and was bundling it by mistake. The active UI lives under `app/` only.

@@ -23,6 +23,9 @@ export function useEmployerPipeline() {
     "idle" | "connecting" | "open" | "closed" | "error"
   >("idle");
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitState, setSubmitState] = useState<
+    "idle" | "submitting" | "streaming" | "done" | "error"
+  >("idle");
   const [pipelineDone, setPipelineDone] = useState(false);
   const [layoutFocus, setLayoutFocus] = useState<LayoutFocus>("balanced");
   const wsRef = useRef<WebSocket | null>(null);
@@ -54,6 +57,8 @@ export function useEmployerPipeline() {
       }
       setWsStatus("connecting");
       setPipelineDone(false);
+      setLayoutFocus("employer");
+      setSubmitState("streaming");
       const socket = new WebSocket(wsUrl(rid));
       wsRef.current = socket;
 
@@ -96,16 +101,29 @@ export function useEmployerPipeline() {
 
           setEvents((prev) => [...prev, normalized]);
 
+          // Auto-focus the active work pane during employer orchestration.
+          if (
+            phase === "jd_extraction" ||
+            phase === "normalization" ||
+            phase === "team_context" ||
+            phase === "mastery"
+          ) {
+            setLayoutFocus("employer");
+          }
           if (phase === "db" && type === "complete") {
             setPipelineDone(true);
-            setLayoutFocus("balanced");
+            setLayoutFocus("resume");
+            setSubmitState("done");
           }
         } catch {
           /* ignore malformed */
         }
       };
 
-      socket.onerror = () => setWsStatus("error");
+      socket.onerror = () => {
+        setWsStatus("error");
+        setSubmitState("error");
+      };
 
       socket.onclose = () => {
         setWsStatus((s) => (s === "connecting" ? "error" : "closed"));
@@ -118,6 +136,7 @@ export function useEmployerPipeline() {
   const startAnalysis = useCallback(
     async (form: FormData) => {
       setSubmitError(null);
+      setSubmitState("submitting");
       setEvents([]);
       setStreams({});
       setRoleId(null);
@@ -134,6 +153,17 @@ export function useEmployerPipeline() {
       const jdText = (form.get("jd_text") as string)?.trim() ?? "";
       if (!hasJdFile && !jdText) {
         setSubmitError("Provide a JD file or paste JD text.");
+        setSubmitState("error");
+        return;
+      }
+
+      const hasTeamFile =
+        form.get("team_context_file") instanceof File &&
+        (form.get("team_context_file") as File).size > 0;
+      const teamText = (form.get("team_context_text") as string)?.trim() ?? "";
+      if (!hasTeamFile && !teamText) {
+        setSubmitError("Provide a Team Context file or paste Team Context text.");
+        setSubmitState("error");
         return;
       }
 
@@ -149,9 +179,11 @@ export function useEmployerPipeline() {
         const body = (await res.json()) as { id: string };
         if (!body.id) throw new Error("No role id returned");
         setRoleId(body.id);
+        setLayoutFocus("employer");
         connectWs(body.id);
       } catch (e) {
         setSubmitError(e instanceof Error ? e.message : "Setup failed");
+        setSubmitState("error");
       }
     },
     [connectWs]
@@ -169,6 +201,7 @@ export function useEmployerPipeline() {
     roleId,
     wsStatus,
     submitError,
+    submitState,
     pipelineDone,
     layoutFocus,
     setLayoutFocus,

@@ -6,7 +6,21 @@ from io import BytesIO
 class PDFService:
     @staticmethod
     def extract_text(file_content: bytes) -> str:
-        """Extracts all text from a PDF file byte stream."""
+        """
+        Extracts all text from a PDF file byte stream or decodes it if it's raw text.
+        """
+        if not file_content:
+            return ""
+
+        # Check for PDF magic number
+        if not file_content.startswith(b"%PDF-"):
+            logger.info("PDFService: Content does not look like a PDF. Decoding as text...")
+            try:
+                return file_content.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                # Fallback to latin-1 if utf-8 fails
+                return file_content.decode("latin-1").strip()
+
         logger.info("PDFService: Extracting text from PDF...")
         try:
             with pdfplumber.open(BytesIO(file_content)) as pdf:
