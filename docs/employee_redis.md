@@ -1,7 +1,7 @@
 # AdaptIQ — Employee Flow: Redis Event Schema
 
 This document defines every event emitted to Redis during the Employee Onboarding Flow.  
-The frontend subscribes to `channel:{role_id}` and renders each event accordingly.
+The frontend subscribes to `channel:{employee_id}` (per upload session) and renders each event accordingly.
 
 > **Model roles (as at March 2026)**
 > | Role | Model | Thinking |
@@ -408,44 +408,4 @@ upload → resume_extraction/start/pdf_parsing
        → gap/log/skill_gap_computed                                (×target skills)
        → gap/result/gap_analysis_done
        → db/complete/employee_persist_done
-```
-
-  "phase": "resume_extraction", "type": "log",
-  "step": "llm_extraction_start",
-  "message": "Sending Resume to LLM for skill and context extraction",
-  "model": "z-ai/glm-4-9b-chat",
-  "data": {}
-}
-```
-
-### 4. Live Streaming Chunks (Fires multiple times)
-As the model generates text, it handles both `reasoning_content` (thinking) and `content` (JSON output).
-```json
-{
-  "phase": "resume_extraction", "type": "stream_chunk",
-  "step": "llm_extraction_streaming",
-  "message": "",
-  "model": "z-ai/glm-4-9b-chat",
-  "data": {
-    "chunk_type": "reasoning", // or "content"
-    "text": "The candidate has worked with FastAPI for 3 years..."
-  }
-}
-```
-
-### 5. Final Resume LLM Result
-Fires once the LLM finishes generating and the JSON is parsed.
-```json
-{
-  "phase": "resume_extraction", "type": "result",
-  "step": "llm_extraction_done",
-  "message": "LLM extracted 22 raw skills from Resume",
-  "model": "z-ai/glm-4-9b-chat",
-  "data": {
-    "raw_count": 20,
-    "skills": [
-      {"skill_name": "FastAPI", "context_depth": "Built backend APIs for processing e-commerce orders"}
-    ]
-  }
-}
 ```

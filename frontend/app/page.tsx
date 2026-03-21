@@ -5,6 +5,7 @@ import { EmployerFormPanel } from "@/components/home/EmployerFormPanel";
 import { ResumePanel } from "@/components/home/ResumePanel";
 import { EventTree } from "@/components/home/EventTree";
 import { useEmployerPipeline } from "@/hooks/useEmployerPipeline";
+import { useEmployeePipeline } from "@/hooks/useEmployeePipeline";
 import { API_BASE } from "@/lib/config";
 
 export default function HomePage() {
@@ -21,6 +22,17 @@ export default function HomePage() {
     setLayoutFocus,
     startAnalysis,
   } = useEmployerPipeline();
+
+  const {
+    events: employeeEvents,
+    streams: employeeStreams,
+    streamKey: employeeStreamKey,
+    wsStatus: employeeWsStatus,
+    pipelineDone: employeePipelineDone,
+    employeeBusy,
+    connect: connectEmployeeStream,
+    orchestrationScrollRef: employeeOrchestrationScrollRef,
+  } = useEmployeePipeline(roleId, setLayoutFocus);
 
   const busy = wsStatus === "connecting" || wsStatus === "open";
   const wsOpen = wsStatus === "open";
@@ -99,9 +111,13 @@ export default function HomePage() {
           </button>
         ))}
         <span className="ml-auto font-mono text-[11px] text-white/40">
-          WS: {wsStatus}
+          Role WS: {wsStatus}
           {busy ? " · pipeline" : ""}
           {pipelineDone ? " · done" : ""}
+          {" · "}
+          Resume WS: {employeeWsStatus}
+          {employeeBusy ? " · pipeline" : ""}
+          {employeePipelineDone ? " · done" : ""}
         </span>
       </div>
 
@@ -175,6 +191,15 @@ export default function HomePage() {
             compact={layoutFocus === "employer" && busy}
             emphasized={layoutFocus === "resume"}
             onUserActivate={() => setLayoutFocus("resume")}
+            onEmployeeSessionStart={connectEmployeeStream}
+            employeeEvents={employeeEvents}
+            employeeStreams={employeeStreams}
+            employeeStreamKey={employeeStreamKey}
+            employeeWsOpen={employeeWsStatus === "open"}
+            employeeWsStatus={employeeWsStatus}
+            employeePipelineDone={employeePipelineDone}
+            employeeBusy={employeeBusy}
+            employeeOrchestrationRef={employeeOrchestrationScrollRef}
           />
         </section>
       </div>

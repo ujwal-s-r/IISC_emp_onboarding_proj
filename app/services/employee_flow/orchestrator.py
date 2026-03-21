@@ -2,7 +2,7 @@
 Employee Flow Orchestrator
 ==========================
 Orchestrates the employee onboarding analysis pipeline (Phases 6–9).
-Publishes events to the Redis channel:{role_id} shared with the employer flow.
+Publishes events to Redis channel:{employee_id} (per-employee; not the employer role channel).
 
 Phases:
   Phase 6 — resume_extraction : PDF parse (async, non-blocking) + LLM skill extraction
@@ -557,10 +557,12 @@ async def orchestrate_employee_flow(
       - Every DB write is fire-and-forget (asyncio.ensure_future) so the LLM
         starts immediately without waiting for persistence to complete.
     """
+    # Redis/WebSocket channel for this employee session (do not use role_id — avoids mixing with employer events)
+    pub_id = employee_id
 
     # ── Phase 6A: Parse Resume PDF (non-blocking) ────────────────────────────
     await _pub(
-        role_id, "resume_extraction", "start", "pdf_parsing",
+        pub_id, "resume_extraction", "start", "pdf_parsing",
         "Parsing uploaded Resume PDF — skill extraction will start immediately after",
     )
 
@@ -572,7 +574,7 @@ async def orchestrate_employee_flow(
     logger.info(f"[Employee Orchestrator] PDF parsed ({len(resume_text)} chars).")
 
     await _pub(
-        role_id, "resume_extraction", "log", "pdf_parsed",
+        pub_id, "resume_extraction", "log", "pdf_parsed",
         "Resume PDF parsed successfully",
         data={"resume_char_count": len(resume_text), "resume_preview": resume_text[:200]},
     )
@@ -584,7 +586,7 @@ async def orchestrate_employee_flow(
 
     # ── Phase 6B: LLM Skill Extraction ──────────────────────────────────────
     await _pub(
-        role_id, "resume_extraction", "log", "llm_extraction_start",
+        pub_id, "resume_extraction", "log", "llm_extraction_start",
         "Sending Resume to LLM for skill and context extraction",
         model=RESUME_MODEL,
     )
@@ -593,7 +595,7 @@ async def orchestrate_employee_flow(
         RESUME_EXTRACTION_PROMPT.replace("{resume_text}", resume_text),
         temperature=0.3,
         max_tokens=16384,
-        role_id=role_id,
+        role_id=pub_id,
         phase="resume_extraction",
         step_name="llm_extraction_streaming",
     )
@@ -605,7 +607,7 @@ async def orchestrate_employee_flow(
         skills_json = []
 
     await _pub(
-        role_id, "resume_extraction", "result", "llm_extraction_done",
+        pub_id, "resume_extraction", "result", "llm_extraction_done",
         f"LLM extracted {len(skills_json)} raw skills from Resume",
         model=RESUME_MODEL,
         data={"raw_count": len(skills_json), "skills": skills_json},
@@ -617,35 +619,35 @@ async def orchestrate_employee_flow(
 
     # ── Phase 7: O*NET Normalisation ─────────────────────────────────────────
     await _pub(
-        role_id, "normalization", "start", "normalization_start",
+        pub_id, "normalization", "start", "normalization_start",
         f"Starting O*NET normalization for {len(skills_json)} employee skills",
     )
 
-    normalized_skills = await normalize_skills(skills_json, role_id=role_id)
+    normalized_skills = await normalize_skills(skills_json, role_id=pub_id)
 
     matched = sum(1 for s in normalized_skills if s.get("source") == "onet_match")
     coined  = sum(1 for s in normalized_skills if s.get("source") == "llm_new")
 
     await _pub(
-        role_id, "normalization", "complete", "normalization_done",
+        pub_id, "normalization", "complete", "normalization_done",
         f"{matched}/{len(normalized_skills)} skills matched to O*NET. {coined} coined.",
         data={"matched": matched, "coined": coined, "total": len(normalized_skills)},
     )
 
     # ── Phase 8: Mastery Scoring ─────────────────────────────────────────────
-    mastery_skills = await compute_mastery_scores(normalized_skills, role_id)
+    mastery_skills = await compute_mastery_scores(normalized_skills, pub_id)
 
     asyncio.ensure_future(_save_mastery_to_db(db, employee_id, mastery_skills))
 
     # ── Phase 9: Gap Analysis ────────────────────────────────────────────────
     target_skills = await _fetch_target_skills(db, role_id)
-    gap_records   = await run_gap_analysis(mastery_skills, target_skills, role_id)
+    gap_records   = await run_gap_analysis(mastery_skills, target_skills, pub_id)
 
     # ── Final DB persist and close event ─────────────────────────────────────
     await _db_save(db, _employee_id=employee_id, status="completed")
 
     await _pub(
-        role_id, "db", "complete", "employee_persist_done",
+        pub_id, "db", "complete", "employee_persist_done",
         "Employee analysis complete",
         data={
             "total_skills":  len(normalized_skills),
