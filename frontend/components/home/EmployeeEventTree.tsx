@@ -4,7 +4,6 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
   type RefObject,
 } from "react";
 import {
@@ -260,23 +259,6 @@ export function EmployeeEventTree({
     return null;
   }, [events, streams, streamKey, wsOpen, wsStatus]);
 
-  const [phaseOpen, setPhaseOpen] = useState<Partial<Record<EmployeePhase, boolean>>>(
-    {}
-  );
-
-  useLayoutEffect(() => {
-    if (!livePhase) return;
-    setPhaseOpen((prev) => {
-      const next = { ...prev };
-      const idx = EMPLOYEE_PHASE_ORDER.indexOf(livePhase);
-      for (let i = 0; i < idx; i++) {
-        next[EMPLOYEE_PHASE_ORDER[i]] = false;
-      }
-      next[livePhase] = true;
-      return next;
-    });
-  }, [livePhase]);
-
   const streamSig = useMemo(() => streamSignature(streams), [streams]);
 
   const activeStepScrollTarget = useMemo((): string | null => {
@@ -425,11 +407,7 @@ export function EmployeeEventTree({
         return (
           <Collapsible
             key={phase}
-            open={phaseOpen[phase] ?? false}
-            onOpenChange={(o) =>
-              setPhaseOpen((p) => ({ ...p, [phase]: o }))
-            }
-            defaultOpen={false}
+            defaultOpen={Boolean(isActive)}
             title={EMPLOYEE_PHASE_LABEL[phase]}
             subtitle={
               phaseEvents.length
@@ -482,15 +460,20 @@ export function EmployeeEventTree({
                     <p className="text-sm font-medium text-emerald-100/90">
                       Extracted skills ({resumeSkills.length})
                     </p>
-                    {typeof resumeResult.data.reasoning_summary === "string" &&
-                    resumeResult.data.reasoning_summary ? (
+                    {(typeof resumeResult.data.reasoning_summary === "string" ||
+                      typeof resumeResult.data.reasoning === "string") &&
+                    (resumeResult.data.reasoning_summary || resumeResult.data.reasoning) ? (
                       <Collapsible
                         title="Phase reasoning summary"
                         defaultOpen={false}
                         className="mt-2 border-emerald-500/20"
                       >
                         <p className="text-sm leading-relaxed text-white/65">
-                          {resumeResult.data.reasoning_summary as string}
+                          {String(
+                            resumeResult.data.reasoning_summary ??
+                              resumeResult.data.reasoning ??
+                              ""
+                          )}
                         </p>
                       </Collapsible>
                     ) : null}
@@ -714,6 +697,22 @@ export function EmployeeEventTree({
             ) : null}
 
             {phase === "db" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => (
+                  <LogRow key={e.id} ev={e} />
+                ))}
+              </div>
+            ) : null}
+
+            {phase === "path" ? (
+              <div className="space-y-2">
+                {phaseEvents.map((e) => (
+                  <LogRow key={e.id} ev={e} />
+                ))}
+              </div>
+            ) : null}
+
+            {phase === "journey" ? (
               <div className="space-y-2">
                 {phaseEvents.map((e) => (
                   <LogRow key={e.id} ev={e} />
